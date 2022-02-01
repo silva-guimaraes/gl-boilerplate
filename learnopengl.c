@@ -27,10 +27,14 @@ struct object {
     vec3 rot;
     unsigned int vao;
 }; 
+
+enum camera_mode { MODE_NONE = 0, MODE_PLAYER, MODE_AIRPLANE  }; 
+
 struct Camera {
     vec3 pos;
     vec3 up;
     vec3 front;
+    enum camera_mode mode;
 
     float yaw, pitch, fov;
 }; 
@@ -40,18 +44,19 @@ struct node * root_node;
 size_t object_count; 
 struct Camera * main_cam; 
 
-
 void terminate_program();
 
 unsigned int update_shader_program(char * vert_shader, char * frag_shader);
 
-struct Camera * new_camera()
+struct Camera * new_camera(enum camera_mode mode)
 {
     struct Camera *tmp = malloc(sizeof(struct Camera));
 
     memcpy(tmp->pos, (vec3) {0, 0, 0}, sizeof(vec3));
     memcpy(tmp->up, (vec3) { 0, 1, 0 }, sizeof(vec3));
     memcpy(tmp->front, (vec3) { 0, 0, -1 }, sizeof(vec3)); 
+
+    tmp->mode = mode;
 
     tmp->pitch = -90; 
     tmp->yaw = 0; 
@@ -149,12 +154,104 @@ size_t new_floppa(struct object **root, size_t count, vec3 position)
     return count + 1;
 } 
 
+#define MOVE_SPEED 20 * delta_time
 
-
+void cam_player_mode(GLFWwindow * window, struct Camera * cam)
+{ 
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 horizon_plane = { cam->front[X], 0, cam->front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_add(horizon_plane, cam->pos, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	//vec3 ret = { 0 };
+	vec3 horizon_plane = { cam->front[X], 0, cam->front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_sub(cam->pos, horizon_plane, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(cam->front, cam->up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(cam->front, cam->up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
+	glm_vec3_add(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
+	glm_vec3_sub(cam->pos, ret, cam->pos); 
+    } 
+} 
+void cam_airplane_mode(GLFWwindow * window, struct Camera * cam)
+{ 
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_copy(cam->front, ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_copy(cam->front, ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(cam->front, cam->up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(cam->front, cam->up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
+	glm_vec3_add(cam->pos, ret, cam->pos);
+    }
+    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
+	glm_vec3_sub(cam->pos, ret, cam->pos); 
+    } 
+}
 void process_input(GLFWwindow * window, struct Camera * cam)
-{
-    const float MOVEMENT_SPEED = 10.0 * delta_time;
-
+{ 
+    switch(cam->mode)
+    {
+	case MODE_PLAYER:
+	    cam_player_mode(window, cam);
+	    break;
+	case MODE_AIRPLANE:
+	    cam_airplane_mode(window, cam);
+	    break;
+	default:
+	    break; 
+    }
     if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
     {
 	terminate_program();
@@ -174,52 +271,6 @@ void process_input(GLFWwindow * window, struct Camera * cam)
     if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS){ 
 	free_floppas(object_root, &object_count);
     }
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-    {
-	vec3 horizon_plane = { cam->front[X], 0, cam->front[Z] };
-	glm_vec3_normalize(horizon_plane);
-	glm_vec3_scale(horizon_plane, MOVEMENT_SPEED, horizon_plane);
-	glm_vec3_add(horizon_plane, cam->pos, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-    {
-	//vec3 ret = { 0 };
-	vec3 horizon_plane = { cam->front[X], 0, cam->front[Z] };
-	glm_vec3_normalize(horizon_plane);
-	glm_vec3_scale(horizon_plane, MOVEMENT_SPEED, horizon_plane);
-	glm_vec3_sub(cam->pos, horizon_plane, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam->front, cam->up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVEMENT_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam->front, cam->up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVEMENT_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam->up, MOVEMENT_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam->up, MOVEMENT_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS){ 
-	//object_count = new_floppa(object_root, object_count, main_cam); 
-	object_count = new_floppa(object_root, object_count, main_cam->pos);
-    }
-    if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS){ 
-	pop_floppa(object_root, main_cam->pos, object_count);
-    }
 } 
 
 
@@ -228,6 +279,7 @@ float lastX = 400, lastY = 300;
 
 void mouse_callback(GLFWwindow * window, double xpos, double ypos) //todo: descobrir como isso funciona
 { 
+    window = window;
     //if (firstMouse)
     //{
     //    lastX = xpos;
@@ -265,6 +317,8 @@ void scroll_callback(GLFWwindow * window, double xoffset, double yoffset)
     main_cam->fov -= yoffset * 2.0;
     //if (fov < FOV_MIN) fov = FOV_MIN;
     //if (fov > FOV_MAX) fov = FOV_MAX;
+    xoffset = xoffset;
+    window = window;
 }
 void framebuffer_size_callback(GLFWwindow * window, int width, int height)
 {
@@ -482,21 +536,24 @@ float cirscum_circle(float s){ return s / sqrt(3); }
 
 void recurse_sier(vec3 * pos_vectors, size_t * vector_count, vec3 peak, float height, int level)
 {
-    if (level == 0 ) return;
+    if (level <= 0 ) return;
 
     float half_s = sier_side(height / 2);
 
-    vec3 front_peak = 	{	      peak[X], 	peak[Y] - height / 2, peak[Z] - cirscum_circle(half_s)};
-    vec3 left_peak = 	{half_s / 2 + peak[X], 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};
-    vec3 right_peak = 	{half_s / 2 - peak[X], 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};;
+    vec3 front_peak = 	{	      	peak[X], 	peak[Y] - height / 2, peak[Z] - cirscum_circle(half_s)};
+    vec3 left_peak = 	{peak[X] + (half_s / 2), 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};
+    vec3 right_peak = 	{peak[X] - (half_s / 2), 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};
 
     recurse_sier(pos_vectors, vector_count, left_peak, 		height / 2, level - 1);
     recurse_sier(pos_vectors, vector_count, right_peak, 	height / 2, level - 1);
     recurse_sier(pos_vectors, vector_count, front_peak, 	height / 2, level - 1);
     recurse_sier(pos_vectors, vector_count, peak, 		height / 2, level - 1); 
 
-    memcpy(pos_vectors[*vector_count], peak, sizeof(vec3));
-    *vector_count += 1;
+    if (level == 1)
+    {
+	memcpy(pos_vectors[*vector_count], peak, sizeof(vec3));
+	*vector_count += 1; 
+    }
     return; 
 } 
 
@@ -535,7 +592,7 @@ int main(void)
     unsigned int VAO = 			init_vertex_array();
     		 shader_program = 	update_shader_program("shader.vert", "shader.frag"); 
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
-    		 main_cam = 		new_camera();
+    		 main_cam = 		new_camera(MODE_AIRPLANE);
     
     glUseProgram(shader_program); 
 
@@ -553,17 +610,18 @@ int main(void)
 #ifndef AUTO_LOAD
     //rand_floppa(object_root, &object_count, 1000, 20);
 
-    int levels = 6;
+    int levels = 7;
     vec3 * pos_vectors = malloc(sizeof(vec3) * (int) pow(4, levels));
     size_t vector_count = 0;
 
 
-    recurse_sier(pos_vectors, &vector_count, (vec3) {0, 0, 0}, 50, levels); 
+    recurse_sier(pos_vectors, &vector_count, (vec3) {0, 0, 0}, 80, levels); 
 
     printf("%ld\n", vector_count);
     for ( size_t i = 0; i < vector_count; ++i ){
-	printf("%f, %f, %f\n", pos_vectors[i][X], pos_vectors[i][Y], pos_vectors[i][Z]);
+	printf("ret: %f, %f, %f\n", pos_vectors[i][X], pos_vectors[i][Y], pos_vectors[i][Z]);
     } 
+
 #endif
     //inicializacao
 
@@ -600,20 +658,6 @@ int main(void)
 
 	glBindVertexArray(VAO); 
 	{ 
-	    for (unsigned int i = 0; i < object_count; ++i)
-	    {
-	        if (object_root[i] != NULL)
-	        { 
-	            #define floppa_pos pos_vectors[i] 
-	            #define relative_pos floppa_pos[X] / 20 , floppa_pos[Y] / 20, floppa_pos[Z] / 20
-	    
-	            glm_mat4_identity(model);
-	            glm_translate(model, floppa_pos); 
-	            glUniform3f(glGetUniformLocation(shader_program, "relative_color"),  relative_pos);
-	            glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
-	            glDrawArrays(GL_TRIANGLES, 0, 36);
-	        }
-	    }
 	    for (size_t i = 0; i < vector_count; ++i)
 	    {
 		glm_mat4_identity(model);
@@ -621,14 +665,7 @@ int main(void)
 		glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
 		glDrawArrays(GL_TRIANGLES, 0, 36); 
 	    }
-	}
-	glm_mat4_identity(model);
-	glm_translate(model, (vec3) { round(main_cam->pos[X]), round(main_cam->pos[Y]), round(main_cam->pos[Z])});
-	glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
-	glDrawArrays(GL_LINE_STRIP, 0, 36); 
-	
-
-
+	} 
 	glfwSwapBuffers(window);
 	glfwPollEvents();
     }
