@@ -476,30 +476,6 @@ void rand_floppa(struct object ** root, size_t *count, const int MAX_FLOP, const
 }
 
 
-float sier_side(float h){ return (2 * h) / sqrt(3); }
-float inscrib_circle(float s){ return (sqrt(3) / 6) * s; }
-float cirscum_circle(float s){ return s / sqrt(3); }
-
-void recurse_sier(vec3 * pos_vectors, size_t * vector_count, vec3 peak, float height, int level)
-{
-    if (level == 0 ) return;
-
-    float half_s = sier_side(height / 2);
-
-    vec3 front_peak = 	{	      peak[X], 	peak[Y] - height / 2, peak[Z] - cirscum_circle(half_s)};
-    vec3 left_peak = 	{half_s / 2 + peak[X], 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};
-    vec3 right_peak = 	{half_s / 2 - peak[X], 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};;
-
-    recurse_sier(pos_vectors, vector_count, left_peak, 		height / 2, level - 1);
-    recurse_sier(pos_vectors, vector_count, right_peak, 	height / 2, level - 1);
-    recurse_sier(pos_vectors, vector_count, front_peak, 	height / 2, level - 1);
-    recurse_sier(pos_vectors, vector_count, peak, 		height / 2, level - 1); 
-
-    memcpy(pos_vectors[*vector_count], peak, sizeof(vec3));
-    *vector_count += 1;
-    return; 
-} 
-
 //struct object * 
 
 int main(void)
@@ -550,20 +526,8 @@ int main(void)
 	load_floppas(object_root, &object_count, main_cam);
     }
 #endif
-#ifndef AUTO_LOAD
-    //rand_floppa(object_root, &object_count, 1000, 20);
-
-    int levels = 6;
-    vec3 * pos_vectors = malloc(sizeof(vec3) * (int) pow(4, levels));
-    size_t vector_count = 0;
-
-
-    recurse_sier(pos_vectors, &vector_count, (vec3) {0, 0, 0}, 50, levels); 
-
-    printf("%ld\n", vector_count);
-    for ( size_t i = 0; i < vector_count; ++i ){
-	printf("%f, %f, %f\n", pos_vectors[i][X], pos_vectors[i][Y], pos_vectors[i][Z]);
-    } 
+#ifndef AUTO_LOAD 
+    rand_floppa(object_root, &object_count, 1000, 20); 
 #endif
     //inicializacao
 
@@ -604,7 +568,7 @@ int main(void)
 	    {
 	        if (object_root[i] != NULL)
 	        { 
-	            #define floppa_pos pos_vectors[i] 
+	            #define floppa_pos object_root[i]->pos
 	            #define relative_pos floppa_pos[X] / 20 , floppa_pos[Y] / 20, floppa_pos[Z] / 20
 	    
 	            glm_mat4_identity(model);
@@ -613,13 +577,6 @@ int main(void)
 	            glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
 	            glDrawArrays(GL_TRIANGLES, 0, 36);
 	        }
-	    }
-	    for (size_t i = 0; i < vector_count; ++i)
-	    {
-		glm_mat4_identity(model);
-		glm_translate(model, pos_vectors[i]);
-		glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
-		glDrawArrays(GL_TRIANGLES, 0, 36); 
 	    }
 	}
 	glm_mat4_identity(model);
