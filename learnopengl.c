@@ -440,7 +440,7 @@ unsigned int update_shader_program(char * vert_shader, char * frag_shader)
 }
 
 
-unsigned int init_vertex_array()
+unsigned int floppa_cube()
 {
     float cube_vertices[] = {
         -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
@@ -529,10 +529,57 @@ void rand_floppa(struct object ** root, size_t *count, const int MAX_FLOP, const
     } 
 }
 
+float sier_side(float h){ 	return (2 * h) / sqrt(3); }
+float inscrib_circle(float s){ 	return (sqrt(3) / 6) * s; }
+float cirscum_circle(float s){ 	return s / sqrt(3)	; }
 
-float sier_side(float h){ return (2 * h) / sqrt(3); }
-float inscrib_circle(float s){ return (sqrt(3) / 6) * s; }
-float cirscum_circle(float s){ return s / sqrt(3); }
+unsigned int pyramid_vao()
+{ 
+    float s = sier_side(2);
+    float hs = s / 2;
+    float ic = inscrib_circle(s);
+    float cs = cirscum_circle(s);
+
+    float vertices[] = {
+     0,   1,  0,  //vertice topo 
+    -hs, -1,  ic, //vertice esquerdo
+     hs, -1,  ic, //vertice direito
+     0,  -1, -cs, //vertice traseiro
+    };
+    int indices[] = {
+    0, 1, 2, //face frontal
+    0, 2, 3, //face direita
+    0, 3, 2, //face esquerda
+    1, 2, 3, //base
+    }; 
+
+    //for ( int i = 0; i < sizeof(indices) / sizeof(float); ++i ){
+    //    printf("%f, ", vertices[i]); 
+    //    if ( (i + 1) % 3 == 0 ) printf("\n");
+    //}
+
+    unsigned int VAO, VBO, EBO; 
+    glGenVertexArrays(1, &VAO); 
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+
+    glBindVertexArray(VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW); 
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 3, (void *) 0); 
+    glEnableVertexAttribArray(0);
+
+    //glBindVertexArray(0);
+    //glBindBuffer(GL_ARRAY_BUFFER, 0); 
+
+    return VAO;
+    
+}
 
 void recurse_sier(vec3 * pos_vectors, size_t * vector_count, vec3 peak, float height, int level)
 {
@@ -557,7 +604,16 @@ void recurse_sier(vec3 * pos_vectors, size_t * vector_count, vec3 peak, float he
     return; 
 } 
 
+struct Pyramid {
+    vec3 * pos_vectors;
+    size_t vector_count;
+    unsigned int pyramid_vao;
+};
+
 //struct object * 
+//#define CUBE
+//
+float square(int x){ return x * x; }
 
 int main(void)
 { 
@@ -589,7 +645,6 @@ int main(void)
     //inicializacao
     glEnable(GL_DEPTH_TEST); 
 
-    unsigned int VAO = 			init_vertex_array();
     		 shader_program = 	update_shader_program("shader.vert", "shader.frag"); 
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
     		 main_cam = 		new_camera(MODE_AIRPLANE);
@@ -599,30 +654,17 @@ int main(void)
     object_count = 0;
     object_root = calloc(5000, sizeof(struct object *));
 
-//#define AUTO_LOAD
+    //unsigned int VAO = floppa_cube();
+    unsigned int VAO = pyramid_vao(); 
 
-#ifdef AUTO_LOAD
-    if (fopen(DUMP_FILE, "r") != NULL)
-    {
-	load_floppas(object_root, &object_count, main_cam);
-    }
-#endif
-#ifndef AUTO_LOAD
-    //rand_floppa(object_root, &object_count, 1000, 20);
 
     int levels = 7;
+    float height = 70;
     vec3 * pos_vectors = malloc(sizeof(vec3) * (int) pow(4, levels));
     size_t vector_count = 0;
 
+    recurse_sier(pos_vectors, &vector_count, (vec3) {0, 0, 0}, height, levels); 
 
-    recurse_sier(pos_vectors, &vector_count, (vec3) {0, 0, 0}, 80, levels); 
-
-    printf("%ld\n", vector_count);
-    for ( size_t i = 0; i < vector_count; ++i ){
-	printf("ret: %f, %f, %f\n", pos_vectors[i][X], pos_vectors[i][Y], pos_vectors[i][Z]);
-    } 
-
-#endif
     //inicializacao
 
 
@@ -660,12 +702,13 @@ int main(void)
 	{ 
 	    for (size_t i = 0; i < vector_count; ++i)
 	    {
-		glm_mat4_identity(model);
-		glm_translate(model, pos_vectors[i]);
-		glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
-		glDrawArrays(GL_TRIANGLES, 0, 36); 
+	        glm_mat4_identity(model);
+	        glm_translate(model, pos_vectors[i]);
+	        glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
+	glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, 0); 
 	    }
 	} 
+
 	glfwSwapBuffers(window);
 	glfwPollEvents();
     }
@@ -676,10 +719,6 @@ int main(void)
 
 void terminate_program()
 {
-#ifdef AUTO_LOAD
-    dump_floppas(object_root, object_count, main_cam); 
-    free_floppas(object_root, &object_count);
-#endif
 
     printf("vendor: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
     int attribs;
