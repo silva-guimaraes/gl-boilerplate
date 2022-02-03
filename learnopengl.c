@@ -39,21 +39,12 @@ struct Camera {
     float yaw, pitch, fov;
 }; 
 
-typedef struct pyramid {
-    vec3 * pos_vectors;
-    size_t vector_count;
-    unsigned int vao;
-    float levels, height;
-    vec3 tetra_height;
-} Pyramid;
-
 struct object ** object_root;
 struct node * root_node;
 size_t object_count; 
 struct Camera * main_cam; 
 
 void terminate_program();
-struct pyramid * generate_pyramid(int levels, float height);
 
 unsigned int update_shader_program(char * vert_shader, char * frag_shader);
 
@@ -248,7 +239,7 @@ void cam_airplane_mode(GLFWwindow * window, struct Camera * cam)
 	glm_vec3_sub(cam->pos, ret, cam->pos); 
     } 
 }
-void process_input(GLFWwindow * window, struct Camera * cam, struct pyramid * pyramid)
+void process_input(GLFWwindow * window, struct Camera * cam)
 { 
     switch(cam->mode)
     {
@@ -279,18 +270,6 @@ void process_input(GLFWwindow * window, struct Camera * cam, struct pyramid * py
     }
     if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS){ 
 	free_floppas(object_root, &object_count);
-    }
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS){ 
-	pyramid = generate_pyramid(
-		(pyramid->levels > 1 ) ? pyramid->levels - 1 : 1,
-		pyramid->height
-		);
-    }
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS){ 
-	pyramid = generate_pyramid(
-		(pyramid->levels < 8 ) ? pyramid->levels + 1 : 8,
-		pyramid->height
-		);
     }
 } 
 
@@ -602,59 +581,6 @@ unsigned int tetrahedron_vao()
     
 }
 
-
-void recurse_sier(struct pyramid * pyramid, vec3 peak, float height, int level)
-{
-    if (level <= 0 ) return;
-
-    float half_s = sier_side(height / 2);
-
-    vec3 front_peak = 	{	      	peak[X], 	peak[Y] - height / 2, peak[Z] - cirscum_circle(half_s)};
-    vec3 left_peak = 	{peak[X] + (half_s / 2), 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};
-    vec3 right_peak = 	{peak[X] - (half_s / 2), 	peak[Y] - height / 2, peak[Z] + inscrib_circle(half_s)};
-
-    recurse_sier(pyramid, left_peak, 	height / 2, level - 1);
-    recurse_sier(pyramid, right_peak, 	height / 2, level - 1);
-    recurse_sier(pyramid, front_peak, 	height / 2, level - 1);
-    recurse_sier(pyramid, peak, 	height / 2, level - 1); 
-
-    if (level == 1)
-    {
-	//printf("%f, %f, %f\n", 
-	//	pyramid->pos_vectors[pyramid->vector_count - 1][X], 
-	//	pyramid->pos_vectors[pyramid->vector_count - 1][Y], 
-	//	pyramid->pos_vectors[pyramid->vector_count - 1][Z] 
-	//	);
-	memcpy(pyramid->pos_vectors[pyramid->vector_count], peak, sizeof(vec3));
-	pyramid->vector_count += 1; 
-    }
-    return; 
-} 
-
-#define h_ratio (height / pow(2, levels - 1)) / (float) 2
-
-struct pyramid * generate_pyramid(int levels, float height)
-{
-    if (levels <= 0) levels = 1;
-
-    struct pyramid * tmp = malloc(sizeof(struct pyramid)); 
-
-    tmp->vao = tetrahedron_vao(); 
-    tmp->pos_vectors = malloc(sizeof(vec3) * (int) pow(4, levels));
-    tmp->vector_count = 0;
-
-    tmp->levels = levels;
-    tmp->height = height;
-
-    tmp->tetra_height[X] = h_ratio; tmp->tetra_height[Y] = h_ratio; tmp->tetra_height[Z] = h_ratio;
-
-    recurse_sier(tmp, (vec3) {0, 0, 0}, height, levels); 
-
-    printf("%ld === \n", tmp->vector_count);
-
-    return tmp;
-}
-
 //struct object * 
 //#define CUBE
 //
@@ -690,18 +616,28 @@ int main(void)
     //inicializacao
     glEnable(GL_DEPTH_TEST); 
 
+    unsigned int VAO = 			floppa_cube();
     		 shader_program = 	update_shader_program("shader.vert", "shader.frag"); 
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
     		 main_cam = 		new_camera(MODE_AIRPLANE);
-    struct pyramid * pyramid = 		generate_pyramid(1, 90);
     
     glUseProgram(shader_program); 
 
-    //unsigned int VAO = floppa_cube();
+    object_count = 0;
+    object_root = calloc(5000, sizeof(struct object *));
 
+//#define AUTO_LOAD
+
+#ifdef AUTO_LOAD
+    if (fopen(DUMP_FILE, "r") != NULL)
+    {
+	load_floppas(object_root, &object_count, main_cam);
+    }
+#endif
+#ifndef AUTO_LOAD 
+    rand_floppa(object_root, &object_count, 1000, 20); 
+#endif
     //inicializacao
-
-    bool key_released[256] = { true };
 
 
     while(!glfwWindowShouldClose(window))
@@ -709,7 +645,7 @@ int main(void)
 	update_delta_time(); 
 	glClearColor(	(glfwGetTime() + 10) * 30, (glfwGetTime() + 15) * 30, (glfwGetTime() + 20) * 30, 1); 
 	glClear(	GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-	process_input(	window, main_cam, pyramid); 
+	process_input(	window, main_cam); 
 	glUseProgram(	shader_program); 
 	glfwGetWindowSize(window, &screen_x, &screen_y);
 
@@ -735,42 +671,28 @@ int main(void)
 	glUniformMatrix4fv(projloc, 1, GL_FALSE, (float *) projection); 
 
 
-	glBindVertexArray(pyramid->vao); 
+	glBindVertexArray(VAO); 
 	{ 
-	    for (size_t i = 0; i < pyramid->vector_count; ++i)
+	    for (size_t i = 0; i < object_count; ++i)
 	    {
-	        glm_mat4_identity(model);
-	        glm_translate(model, pyramid->pos_vectors[i]);
-		glm_scale(model, pyramid->tetra_height);
-		glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
-		glDrawElements(GL_TRIANGLES, 12, GL_UNSIGNED_INT, 0); 
+	        if (object_root[i] != NULL)
+	        { 
+	            #define floppa_pos object_root[i]->pos
+	            #define relative_pos floppa_pos[X] / 20 , floppa_pos[Y] / 20, floppa_pos[Z] / 20
+	    
+	            glm_mat4_identity(model);
+	            glm_translate(model, floppa_pos); 
+	            glUniform3f(glGetUniformLocation(shader_program, "relative_color"),  relative_pos);
+	            glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
+	            glDrawArrays(GL_TRIANGLES, 0, 36);
+	        }
 	    }
-	} 
-
-#define MAX_RECURSION 10
-
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS && key_released[GLFW_KEY_Q] == true)
-    { 
-        pyramid = generate_pyramid(
-        	(pyramid->levels > 1 ) ? pyramid->levels - 1 : 1,
-        	pyramid->height
-        	);
-        key_released[GLFW_KEY_Q] = false;
-    }
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS && key_released[GLFW_KEY_E] == true)
-    { 
-        pyramid = generate_pyramid(
-        	(pyramid->levels < MAX_RECURSION ) ? pyramid->levels + 1 : MAX_RECURSION,
-        	pyramid->height
-        	);
-        key_released[GLFW_KEY_E] = false;
-    } 
-    if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_RELEASE){ 
-        key_released[GLFW_KEY_Q] = true;
-    }
-    if (glfwGetKey(window, GLFW_KEY_E) == GLFW_RELEASE){ 
-        key_released[GLFW_KEY_E] = true;
-    }
+	}
+	glm_mat4_identity(model);
+	glm_translate(model, (vec3) { round(main_cam->pos[X]), round(main_cam->pos[Y]), round(main_cam->pos[Z])});
+	glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
+	glDrawArrays(GL_LINE_STRIP, 0, 36); 
+	
 
 	glfwSwapBuffers(window);
 	glfwPollEvents();
