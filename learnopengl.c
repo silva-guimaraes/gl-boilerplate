@@ -12,15 +12,12 @@
 #define Y 1
 #define Z 2
 #define W 3
+#define SCROLL_SPEED 4.0
 
-int screen_x;
-int screen_y;
-unsigned int shader_program; 
+double xscroll, yscroll;
 
-struct node {
-    struct object * obj;
-    struct node * next; 
-};
+#define KEY_AMOUNT 245
+char key_table[KEY_AMOUNT];
 
 struct object {
     vec3 pos;
@@ -39,30 +36,33 @@ struct Camera {
     float yaw, pitch, fov;
 }; 
 
-struct object ** object_root;
-struct node * root_node;
-size_t object_count; 
-struct Camera * main_cam; 
+struct engine_context {
+    struct object ** obj;
+    unsigned int shade;
+    struct Camera cam;
+    GLFWwindow * w;
+    
+    size_t count;
+    size_t floppa_range; 
+
+    int screen_x;
+    int screen_y;
+};
+
 
 void terminate_program();
 
 unsigned int update_shader_program(char * vert_shader, char * frag_shader);
 
-struct Camera * new_camera(enum camera_mode mode)
-{
-    struct Camera *tmp = malloc(sizeof(struct Camera));
-
-    memcpy(tmp->pos, (vec3) {0, 0, 0}, sizeof(vec3));
-    memcpy(tmp->up, (vec3) { 0, 1, 0 }, sizeof(vec3));
-    memcpy(tmp->front, (vec3) { 0, 0, -1 }, sizeof(vec3)); 
-
-    tmp->mode = mode;
-
-    tmp->pitch = -90; 
-    tmp->yaw = 0; 
-    tmp->fov = 45;
-
-    return tmp; 
+struct Camera new_camera(enum camera_mode mode)
+{ 
+    return (struct Camera) { 	.fov = 45,
+    				.front =  {0, 0, -1}, 
+    				.mode = mode,
+    				.pitch = -90,
+    				.pos =  {0, 0, 0},
+    				.up =  {0, 1, 0},
+    				.yaw = 0 }; 
 }
 
 float current_frame = 0, last_frame = 0, delta_time; 
@@ -92,22 +92,31 @@ void pop_floppa(struct object ** root, vec3 position, size_t count)
 	}
     }
 }
-void dump_floppas(struct object ** root, size_t count, struct Camera * cam)
-{
+void dump_floppas(struct object ** root, size_t count, struct Camera cam)
+{ 
     FILE * target_file = fopen(DUMP_FILE, "w");
 
     fwrite(&count, sizeof(size_t), 1, target_file);
-    fwrite(cam, sizeof(struct Camera), 1, target_file);
+    fwrite(&cam, sizeof(struct Camera), 1, target_file);
 
     for (unsigned int i = 0; i < count; ++i){
-	if (root[i] != NULL){
+	if (root[i] != NULL)
+	{
 	    fwrite(root[i], sizeof(struct object), 1, target_file);
 	}
     }
     fclose(target_file); 
 }
+void free_floppas(struct object ** root, size_t *count)
+{
+    size_t i = 0;
+    while ( i < *count ) free(root[i++]); 
+    *count = 0;
+}
 void load_floppas(struct object ** root, size_t *count, struct Camera * cam)
 {
+    free_floppas(root, count);
+
     FILE * target_file = fopen("scene.floppa", "r");
     if (target_file == NULL){
 	fprintf(stderr, "nao foi possivel encontrar arquivo\n");
@@ -125,13 +134,6 @@ void load_floppas(struct object ** root, size_t *count, struct Camera * cam)
     }
     fclose(target_file);
     
-}
-void free_floppas(struct object ** root, size_t *count)
-{
-    size_t i = 0;
-    while ( i < *count ) free(root[i++]); 
-    //free(root);
-    *count = 0;
 }
 size_t new_floppa(struct object **root, size_t count, vec3 position)
 { 
@@ -154,132 +156,167 @@ size_t new_floppa(struct object **root, size_t count, vec3 position)
     return count + 1;
 } 
 
-#define MOVE_SPEED 50 * delta_time
+void rand_floppa(struct object ** root, size_t *count, int MAX_FLOP, const int RANGE)
+{
+    srand(time(NULL));
 
-void cam_player_mode(GLFWwindow * window, struct Camera * cam)
-{ 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-    {
-	vec3 horizon_plane = { cam->front[X], 0, cam->front[Z] };
-	glm_vec3_normalize(horizon_plane);
-	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
-	glm_vec3_add(horizon_plane, cam->pos, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-    {
-	//vec3 ret = { 0 };
-	vec3 horizon_plane = { cam->front[X], 0, cam->front[Z] };
-	glm_vec3_normalize(horizon_plane);
-	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
-	glm_vec3_sub(cam->pos, horizon_plane, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam->front, cam->up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam->front, cam->up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
-    }
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos); 
+    while (MAX_FLOP) {
+	int rand_x = (rand() % RANGE) - (RANGE / (int) 2); 
+	int rand_y = (rand() % RANGE) - (RANGE / (int) 2); 
+	int rand_z = (rand() % RANGE) - (RANGE / (int) 2); 
+	vec3 rand_pos = {rand_x, rand_y, rand_z};
+
+	*count = new_floppa(root, *count, rand_pos);
+
+	--MAX_FLOP; 
     } 
 } 
-void cam_airplane_mode(GLFWwindow * window, struct Camera * cam)
+#define MOVE_SPEED 50 * delta_time
+
+struct Camera cam_player_mode(GLFWwindow * w, struct Camera cam)
 { 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+
+    if (glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS)
     {
-	vec3 ret = { 0 };
-	glm_vec3_copy(cam->front, ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
+	vec3 horizon_plane = { cam.front[X], 0, cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_add(horizon_plane, cam.pos, cam.pos);
     }
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+    if (glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS)
     {
-	vec3 ret = { 0 };
-	glm_vec3_copy(cam->front, ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos);
+	//vec3 ret = { 0 };
+	vec3 horizon_plane = { cam.front[X], 0, cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_sub(cam.pos, horizon_plane, cam.pos);
     }
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS){
+    if (glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS){
 	vec3 ret = { 0 };
-	glm_vec3_cross(cam->front, cam->up, ret);
+	glm_vec3_cross(cam.front, cam.up, ret);
 	glm_vec3_normalize(ret);
 	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
+	glm_vec3_add(cam.pos, ret, cam.pos);
     }
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS){
+    if (glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS){
 	vec3 ret = { 0 };
-	glm_vec3_cross(cam->front, cam->up, ret);
+	glm_vec3_cross(cam.front, cam.up, ret);
 	glm_vec3_normalize(ret);
 	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos);
+	glm_vec3_sub(cam.pos, ret, cam.pos);
     }
-    if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS){
+    if (glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS){
 	vec3 ret = { 0 };
-	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
-	glm_vec3_add(cam->pos, ret, cam->pos);
+	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
+	glm_vec3_add(cam.pos, ret, cam.pos);
     }
-    if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+    if (glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
 	vec3 ret = { 0 };
-	glm_vec3_scale(cam->up, MOVE_SPEED, ret);
-	glm_vec3_sub(cam->pos, ret, cam->pos); 
+	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
+	glm_vec3_sub(cam.pos, ret, cam.pos); 
     } 
-}
-void process_input(GLFWwindow * window, struct Camera * cam)
+
+    return cam;
+} 
+struct Camera cam_airplane_mode(GLFWwindow * w, struct Camera cam)
 { 
-    switch(cam->mode)
+    if (glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_copy(cam.front, ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(cam.pos, ret, cam.pos);
+    }
+    if (glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_copy(cam.front, ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(cam.pos, ret, cam.pos);
+    }
+    if (glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(cam.front, cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(cam.pos, ret, cam.pos);
+    }
+    if (glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(cam.front, cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(cam.pos, ret, cam.pos);
+    }
+    if (glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
+	glm_vec3_add(cam.pos, ret, cam.pos);
+    }
+    if (glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
+	glm_vec3_sub(cam.pos, ret, cam.pos); 
+    } 
+
+    return cam;
+}
+
+#define FLOPPA_COUNT 1000
+
+struct engine_context 
+process_input(struct engine_context g)
+{ 
+    switch(g.cam.mode)
     {
 	case MODE_PLAYER:
-	    cam_player_mode(window, cam);
+	    g.cam = cam_player_mode(g.w, g.cam);
 	    break;
 	case MODE_AIRPLANE:
-	    cam_airplane_mode(window, cam);
+	    g.cam = cam_airplane_mode(g.w, g.cam);
 	    break;
 	default:
 	    break; 
     }
-    if(glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    if(glfwGetKey(g.w, GLFW_KEY_ESCAPE) == GLFW_PRESS)
     {
 	terminate_program();
 	printf("foobar: ESC pressed. exiting.\n");
-	glfwSetWindowShouldClose(window, true);
+	glfwSetWindowShouldClose(g.w, true);
     }
-    if (glfwGetKey(window, GLFW_KEY_F1) == GLFW_PRESS){
-	glUseProgram(shader_program);
-	shader_program = update_shader_program("shader.vert", "shader.frag");
+    if (glfwGetKey(g.w, GLFW_KEY_F1) == GLFW_PRESS){
+	glUseProgram(g.shade);
+	g.shade = update_shader_program("shader.vert", "shader.frag");
     }
-    if (glfwGetKey(window, GLFW_KEY_F2) == GLFW_PRESS){ 
-	dump_floppas(object_root, object_count, main_cam);
+    if (glfwGetKey(g.w, GLFW_KEY_F2) == GLFW_PRESS){ 
+	dump_floppas(g.obj, g.count, g.cam);
     }
-    if (glfwGetKey(window, GLFW_KEY_F3) == GLFW_PRESS){ 
-	load_floppas(object_root, &object_count, main_cam);
+    if (glfwGetKey(g.w, GLFW_KEY_F3) == GLFW_PRESS){ 
+	load_floppas(g.obj, &g.count, &g.cam);
     }
-    if (glfwGetKey(window, GLFW_KEY_F4) == GLFW_PRESS){ 
-	free_floppas(object_root, &object_count);
-    }
+    if (glfwGetKey(g.w, GLFW_KEY_F4) == GLFW_PRESS){ 
+	g.floppa_range += 5;
+	free_floppas(g.obj, &g.count);
+	rand_floppa(g.obj, &g.count, FLOPPA_COUNT, g.floppa_range); 
+    } 
+    if (glfwGetKey(g.w, GLFW_KEY_F5) == GLFW_PRESS && key_table[glfwGetKeyScancode(GLFW_KEY_F5)] == GLFW_RELEASE){ 
+	g.floppa_range -= (g.floppa_range > 5) ? 5: 0;
+	free_floppas(g.obj, &g.count);
+	rand_floppa(g.obj, &g.count, FLOPPA_COUNT, g.floppa_range); 
+
+	key_table[glfwGetKeyScancode(GLFW_KEY_F5)] = GLFW_PRESS; 
+    } 
+    else if (glfwGetKey(g.w, GLFW_KEY_F5) == GLFW_RELEASE) key_table[glfwGetKeyScancode(GLFW_KEY_F5)] = GLFW_RELEASE;
+
+    return g;
 } 
 
 
 bool firstMouse = true;
 float lastX = 400, lastY = 300;
 
-void mouse_callback(GLFWwindow * window, double xpos, double ypos) //todo: descobrir como isso funciona
+struct Camera mouse_callback(double xpos, double ypos, struct Camera cam) 
 { 
-    window = window;
     //if (firstMouse)
     //{
     //    lastX = xpos;
@@ -288,38 +325,48 @@ void mouse_callback(GLFWwindow * window, double xpos, double ypos) //todo: desco
     //}
 
     float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
+    float yoffset = lastY - ypos; 
     lastX = xpos;
     lastY = ypos;
 
-    float sensitivity = 0.1f; // change this value to your liking
+    float sensitivity = 0.1f; 
     xoffset *= sensitivity;
     yoffset *= sensitivity;
 
-    main_cam->yaw += xoffset;
-    main_cam->pitch += yoffset;
+    cam.yaw += xoffset;
+    cam.pitch += yoffset;
 
-    // make sure that when pitch is out of bounds, screen doesn't get flipped
-    if (main_cam->pitch > 89.0f)
-	main_cam->pitch = 89.0f;
-    if (main_cam->pitch < -89.0f)
-	main_cam->pitch = -89.0f;
+    if (cam.pitch > 89.0f)
+	cam.pitch = 89.0f;
+    if (cam.pitch < -89.0f)
+	cam.pitch = -89.0f;
 
     vec3 front;
-    front[X] = cos(glm_rad(main_cam->yaw)) * cos(glm_rad(main_cam->pitch));
-    front[Y] = sin(glm_rad(main_cam->pitch));
-    front[Z] = sin(glm_rad(main_cam->yaw)) * cos(glm_rad(main_cam->pitch));
-    glm_vec3_normalize(front); glm_vec3_copy(front, main_cam->front);
+    front[X] = cos(glm_rad(cam.yaw)) * cos(glm_rad(cam.pitch));
+    front[Y] = sin(glm_rad(cam.pitch));
+    front[Z] = sin(glm_rad(cam.yaw)) * cos(glm_rad(cam.pitch));
+    glm_vec3_normalize(front); glm_vec3_copy(front, cam.front);
+
+    return cam;
 
 }
-void scroll_callback(GLFWwindow * window, double xoffset, double yoffset)
+void get_scroll(GLFWwindow * window, double xoffset, double yoffset) //fuck callback functions
 {
-    main_cam->fov -= yoffset * 2.0;
+	xscroll = xoffset; 
+	yscroll = yoffset;
+} 
+struct Camera
+update_scroll(struct Camera cam)
+{
+    cam.fov -= yscroll * SCROLL_SPEED; 
+
+    xscroll = 0; 
+    yscroll = 0; 
     //if (fov < FOV_MIN) fov = FOV_MIN;
     //if (fov > FOV_MAX) fov = FOV_MAX;
-    xoffset = xoffset;
-    window = window;
+    return cam;
 }
+
 void framebuffer_size_callback(GLFWwindow * window, int width, int height)
 {
     glViewport(0, 0, width, height); 
@@ -356,12 +403,9 @@ unsigned int load_texture(const char *filename)
 	fprintf(stderr, "deu pra carregar a imagem nao chefia\n");
 	exit(1);
     } 
-}
-
-
+} 
 char * file_to_string(const char * filename)
-{
-
+{ 
     FILE* tmp = fopen(filename, "r");
     if (tmp == NULL)
     {
@@ -381,20 +425,16 @@ char * file_to_string(const char * filename)
     return ret; 
 } 
 unsigned int compile_shader(const char * shader_source, GLenum target_shader)
-{
+{ 
+    unsigned int shader_process; 
+    shader_process = glCreateShader(target_shader);  
 
-    //um shader é uma parte de um processo da pipeline de renderização do opengl
-    //
-    //todo shader é compilado em run-time e precisa ser passado como string para a GPU
-    unsigned int shader_process; //todo shader tambem é um objecto que precisa de uma identificação (referenia/handle)
-    shader_process = glCreateShader(target_shader); //criar o objeto 
-
-    glShaderSource(shader_process, 1, &shader_source, NULL); //especificar o código fonte a ser compilado
-    glCompileShader(shader_process); //compilar o código fonte do shader
+    glShaderSource(shader_process, 1, &shader_source, NULL); 
+    glCompileShader(shader_process); 
 
     int success;
-    char infolog[521]; //buffer onde erro sera logado
-    glGetShaderiv(shader_process, GL_COMPILE_STATUS, &success); //retornar status da compilação
+    char infolog[521]; 
+    glGetShaderiv(shader_process, GL_COMPILE_STATUS, &success); 
     if(!success)
     {
 	glGetShaderInfoLog(shader_process, 512, NULL, infolog); //log do erro
@@ -513,21 +553,6 @@ unsigned int floppa_cube()
 }
 
 
-void rand_floppa(struct object ** root, size_t *count, const int MAX_FLOP, const int RANGE)
-{
-    int i = 0;
-    srand(time(NULL));
-
-    while (i < MAX_FLOP) {
-	int rand_x = rand() % RANGE; 
-	int rand_y = rand() % RANGE; 
-	int rand_z = rand() % RANGE; 
-	vec3 rand_pos = {rand_x, rand_y, rand_z};
-
-	*count = new_floppa(root, *count, rand_pos);
-	++i;
-    } 
-}
 
 float sier_side(float h){ 	return (2 * h) / sqrt(3); }
 float inscrib_circle(float s){ 	return (sqrt(3) / 6) * s; }
@@ -581,13 +606,14 @@ unsigned int tetrahedron_vao()
     
 }
 
-//struct object * 
-//#define CUBE
-//
-float square(int x){ return x * x; }
-
 int main(void)
 { 
+    struct engine_context game = { 0 };
+    game.floppa_range = 40; 
+    memset(key_table, GLFW_RELEASE, KEY_AMOUNT);
+    yscroll = 0; xscroll = 0; 
+    printf("hello world\n");
+
     //glfw fluff 
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -595,77 +621,83 @@ int main(void)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); 
     
 
-    GLFWwindow * window = glfwCreateWindow(500, 500, "teste", NULL, NULL);
-    if (window == NULL) {
+    game.w = glfwCreateWindow(500, 500, "teste", NULL, NULL);
+    if (game.w == NULL) {
 	glfwTerminate();
 	return -1;
     } 
-    glfwMakeContextCurrent(window);
+    glfwMakeContextCurrent(game.w);
 
     if( !gladLoadGLLoader((GLADloadproc) glfwGetProcAddress) )
     {
 	return -1;
     }
 
-    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback); 
-    glfwSetCursorPosCallback(window, mouse_callback);
-    glfwSetScrollCallback(window, scroll_callback);
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetFramebufferSizeCallback(game.w, framebuffer_size_callback); 
+    //glfwSetCursorPosCallback(game.w, mouse_callback);
+    glfwSetScrollCallback(game.w, get_scroll);
+    glfwSetInputMode(game.w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     //glfw fluff 
 
     //inicializacao
     glEnable(GL_DEPTH_TEST); 
 
     unsigned int VAO = 			floppa_cube();
-    		 shader_program = 	update_shader_program("shader.vert", "shader.frag"); 
+    		 game.shade = 		update_shader_program("shader.vert", "shader.frag"); 
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
-    		 main_cam = 		new_camera(MODE_AIRPLANE);
+    		 game.cam = 		new_camera(MODE_AIRPLANE);
     
-    glUseProgram(shader_program); 
+    glUseProgram(game.shade); 
 
-    object_count = 0;
-    object_root = calloc(5000, sizeof(struct object *));
+    game.count = 0;
+    game.obj = calloc(5000, sizeof(struct object *));
 
 //#define AUTO_LOAD
 
 #ifdef AUTO_LOAD
     if (fopen(DUMP_FILE, "r") != NULL)
     {
-	load_floppas(object_root, &object_count, main_cam);
+	load_floppas(game.obj, &game.count, &game.cam);
     }
-#endif
-#ifndef AUTO_LOAD 
-    rand_floppa(object_root, &object_count, 1000, 20); 
+#else
+    rand_floppa(game.obj, &game.count, FLOPPA_COUNT, 50); 
 #endif
     //inicializacao
 
 
-    while(!glfwWindowShouldClose(window))
+    while(!glfwWindowShouldClose(game.w))
     {
 	update_delta_time(); 
-	glClearColor(	(glfwGetTime() + 10) * 30, (glfwGetTime() + 15) * 30, (glfwGetTime() + 20) * 30, 1); 
-	glClear(	GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-	process_input(	window, main_cam); 
-	glUseProgram(	shader_program); 
-	glfwGetWindowSize(window, &screen_x, &screen_y);
+	glClearColor(		(glfwGetTime() + 10) * 30, (glfwGetTime() + 15) * 30, (glfwGetTime() + 20) * 30, 1); 
+	glClear(		GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+	game = 			process_input(game); 
+	game.cam = 		update_scroll(game.cam);
+	glUseProgram(		game.shade); 
+	glfwGetWindowSize(	game.w, &game.screen_x, &game.screen_y); 
 
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(	GL_TEXTURE_2D, texture1);
-	glUniform1i(glGetUniformLocation(shader_program, "texture1"), 1); 
+	glActiveTexture(	GL_TEXTURE1);
+	glBindTexture(		GL_TEXTURE_2D, texture1); 
+	glUniform1i(		glGetUniformLocation(game.shade, "texture1"), 1); 
 
 	mat4 model = { 0 }; 		glm_mat4_identity(model);
 	mat4 projection = { 0 }; 	glm_mat4_identity(projection); 
 	mat4 view = { 0 }; 		glm_mat4_identity(view); 
 
-	glm_perspective(glm_rad(main_cam->fov), (float) screen_x / screen_y, 0.01, 400, projection);
+	glm_perspective(glm_rad(game.cam.fov), (float) game.screen_x / game.screen_y, 0.01, 400, projection);
 	//glm_ortho(		-1.0f, 1, -1, 1, -1, 1, projection); 
 
 	vec3 camera_target; 
-	glm_vec3_add(	main_cam->pos, main_cam->front, camera_target); 
-	glm_lookat(	main_cam->pos, camera_target, 	main_cam->up, view);
+	//glm_vec3_add(	main_cam->pos, main_cam->front, camera_target); 
+	
+	float speed = 0.5;
+	float radius = 25;
+	float rot_x = sin(glfwGetTime() * speed) * radius;
+	float rot_z = cos(glfwGetTime() * speed) * radius;
 
-	unsigned int viewloc = 	glGetUniformLocation(shader_program, "view");
-	unsigned int projloc = 	glGetUniformLocation(shader_program, "projection"); 
+	glm_lookat((vec3) {rot_x, 0, rot_z}, (vec3) {0, 0, 0}, game.cam.up, view);
+
+	unsigned int viewloc = 	glGetUniformLocation(game.shade, "view");
+	unsigned int projloc = 	glGetUniformLocation(game.shade, "projection"); 
 
 	glUniformMatrix4fv(viewloc, 1, GL_FALSE, (float *) view); 
 	glUniformMatrix4fv(projloc, 1, GL_FALSE, (float *) projection); 
@@ -673,28 +705,28 @@ int main(void)
 
 	glBindVertexArray(VAO); 
 	{ 
-	    for (size_t i = 0; i < object_count; ++i)
+	    for (size_t i = 0; i < game.count; ++i)
 	    {
-	        if (object_root[i] != NULL)
+	        if (game.obj[i] != NULL)
 	        { 
-	            #define floppa_pos object_root[i]->pos
+	            #define floppa_pos game.obj[i]->pos
 	            #define relative_pos floppa_pos[X] / 20 , floppa_pos[Y] / 20, floppa_pos[Z] / 20
 	    
 	            glm_mat4_identity(model);
 	            glm_translate(model, floppa_pos); 
-	            glUniform3f(glGetUniformLocation(shader_program, "relative_color"),  relative_pos);
-	            glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
+	            glUniform3f(glGetUniformLocation(game.shade, "relative_color"),  relative_pos);
+	            glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
 	            glDrawArrays(GL_TRIANGLES, 0, 36);
 	        }
 	    }
 	}
 	glm_mat4_identity(model);
-	glm_translate(model, (vec3) { round(main_cam->pos[X]), round(main_cam->pos[Y]), round(main_cam->pos[Z])});
-	glUniformMatrix4fv(glGetUniformLocation(shader_program, "model"), 1, GL_FALSE, (float *) model); 
+	glm_translate(model, (vec3) { round(game.cam.pos[X]), round(game.cam.pos[Y]), round(game.cam.pos[Z])});
+	glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
 	glDrawArrays(GL_LINE_STRIP, 0, 36); 
 	
 
-	glfwSwapBuffers(window);
+	glfwSwapBuffers(game.w);
 	glfwPollEvents();
     }
 
@@ -702,13 +734,17 @@ int main(void)
 
 }
 
-void terminate_program()
+void terminate_program(struct engine_context g)
 {
 
+#ifdef AUTO_LOAD
+    dump_floppas(g.obj, g.count, g.cam);
+#endif 
     printf("vendor: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
     int attribs;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &attribs); 
     printf("numbero maximo de attributos suportados: %d\n", attribs);
+
 
     glfwTerminate();
 
