@@ -12,31 +12,37 @@
 #define Y 1
 #define Z 2
 #define W 3
+
 #define SCROLL_SPEED 4.0
+#define KEY_AMOUNT 245
+#define MODE_COUNT 4
 
 double xscroll, yscroll;
-
-#define KEY_AMOUNT 245
 char key_table[KEY_AMOUNT];
 
 struct object {
     vec3 pos;
     vec3 rot;
     unsigned int vao;
+    unsigned int shader;
 }; 
 
-enum camera_mode { MODE_NONE = 0, MODE_PLAYER, MODE_AIRPLANE  }; 
+enum camera_mode { MODE_NONE = 0, MODE_PLAYER, MODE_AIRPLANE, MODE_STARE, MODE_ORBIT }; 
 
-struct Camera {
+struct Camera 
+{
     vec3 pos;
     vec3 up;
     vec3 front;
     enum camera_mode mode;
 
+    mat4 projection;
+    mat4 view;
     float yaw, pitch, fov;
 }; 
 
-struct engine_context {
+struct engine_state 
+{
     struct object ** obj;
     unsigned int shade;
     struct Camera cam;
@@ -49,6 +55,14 @@ struct engine_context {
     int screen_y;
 };
 
+struct shader_contenxt 
+{
+    const char* vertex;
+    //const char* geometry;
+    const char* fragment;
+    unsigned int id;
+};
+
 
 void terminate_program();
 
@@ -57,12 +71,14 @@ unsigned int update_shader_program(char * vert_shader, char * frag_shader);
 struct Camera new_camera(enum camera_mode mode)
 { 
     return (struct Camera) { 	.fov = 45,
+    				.pos =  {0, 0, 0},
     				.front =  {0, 0, -1}, 
     				.mode = mode,
     				.pitch = -90,
-    				.pos =  {0, 0, 0},
     				.up =  {0, 1, 0},
-    				.yaw = 0 }; 
+    				.yaw = 0,
+				.projection = { 0 },
+				}; 
 }
 
 float current_frame = 0, last_frame = 0, delta_time; 
@@ -75,6 +91,7 @@ void update_delta_time()
 }
 
 #define root_grid_pos (vec3) { round(root[i]->pos[X]), round(root[i]->pos[Y]), round(root[i]->pos[Z])}
+#define obj_grid_pos (vec3) { round(g.obj[i]->pos[X]), round(g.obj[i]->pos[Y]), round(g.obj[i]->pos[Z])}
 
 #define DUMP_FILE "scene.floppa"
 
@@ -135,14 +152,23 @@ void load_floppas(struct object ** root, size_t *count, struct Camera * cam)
     fclose(target_file);
     
 }
-size_t new_floppa(struct object **root, size_t count, vec3 position)
-{ 
-    for (unsigned int i = 0; i < count; ++i)
-    {
-	if(root[i] != NULL) { 
-	    if (memcmp(position, root_grid_pos, sizeof(vec3)) == 0)
-		return count;
+
+bool is_space_free(struct engine_state g, vec3 space)
+{
+    for (unsigned int i = 0; i < g.count; ++i) {
+	if(g.obj[i] != NULL)
+	{ 
+	    if (memcmp(space, obj_grid_pos, sizeof(vec3)) == 0)
+		return false; 
 	}
+    }
+    return true; 
+}
+struct engine_state
+new_floppa(struct engine_state g, vec3 position)
+{ 
+    if (!is_space_free(g, position)){
+	return g;
     }
 
     struct object * floppa = malloc(sizeof(struct object));
@@ -150,179 +176,47 @@ size_t new_floppa(struct object **root, size_t count, vec3 position)
 	    round(position[X]), 
 	    round(position[Y]), 
 	    round(position[Z])}, sizeof(vec3)); 
-    //floppa->vao = vao;
 
-    root[count] = floppa; 
-    return count + 1;
+    g.obj[g.count] = floppa; 
+    g.count += 1;
+    return g;
 } 
 
-void rand_floppa(struct object ** root, size_t *count, int MAX_FLOP, const int RANGE)
+int rand_over_range(const int range) 
 {
-    srand(time(NULL));
+    return (rand() % range) - (range / (int) 2); 
+}
 
-    while (MAX_FLOP) {
-	int rand_x = (rand() % RANGE) - (RANGE / (int) 2); 
-	int rand_y = (rand() % RANGE) - (RANGE / (int) 2); 
-	int rand_z = (rand() % RANGE) - (RANGE / (int) 2); 
-	vec3 rand_pos = {rand_x, rand_y, rand_z};
+struct engine_state
+rand_floppa(struct engine_state g, int MAX_FLOP, const int RANGE)
+{
+    srand(0);
 
-	*count = new_floppa(root, *count, rand_pos);
+    while (MAX_FLOP) { 
+	g = new_floppa(g, (vec3) { 
+	    rand_over_range(RANGE),
+	    rand_over_range(RANGE),
+	    rand_over_range(RANGE)});
 
 	--MAX_FLOP; 
     } 
-} 
-#define MOVE_SPEED 50 * delta_time
-
-struct Camera cam_player_mode(GLFWwindow * w, struct Camera cam)
-{ 
-
-    if (glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS)
-    {
-	vec3 horizon_plane = { cam.front[X], 0, cam.front[Z] };
-	glm_vec3_normalize(horizon_plane);
-	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
-	glm_vec3_add(horizon_plane, cam.pos, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS)
-    {
-	//vec3 ret = { 0 };
-	vec3 horizon_plane = { cam.front[X], 0, cam.front[Z] };
-	glm_vec3_normalize(horizon_plane);
-	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
-	glm_vec3_sub(cam.pos, horizon_plane, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam.front, cam.up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_add(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam.front, cam.up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_sub(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
-	glm_vec3_add(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
-	glm_vec3_sub(cam.pos, ret, cam.pos); 
-    } 
-
-    return cam;
-} 
-struct Camera cam_airplane_mode(GLFWwindow * w, struct Camera cam)
-{ 
-    if (glfwGetKey(w, GLFW_KEY_W) == GLFW_PRESS)
-    {
-	vec3 ret = { 0 };
-	glm_vec3_copy(cam.front, ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_add(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_S) == GLFW_PRESS)
-    {
-	vec3 ret = { 0 };
-	glm_vec3_copy(cam.front, ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_sub(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_D) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam.front, cam.up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_add(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_A) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_cross(cam.front, cam.up, ret);
-	glm_vec3_normalize(ret);
-	glm_vec3_scale(ret, MOVE_SPEED, ret);
-	glm_vec3_sub(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_SPACE) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
-	glm_vec3_add(cam.pos, ret, cam.pos);
-    }
-    if (glfwGetKey(w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
-	vec3 ret = { 0 };
-	glm_vec3_scale(cam.up, MOVE_SPEED, ret);
-	glm_vec3_sub(cam.pos, ret, cam.pos); 
-    } 
-
-    return cam;
-}
-
-#define FLOPPA_COUNT 1000
-
-struct engine_context 
-process_input(struct engine_context g)
-{ 
-    switch(g.cam.mode)
-    {
-	case MODE_PLAYER:
-	    g.cam = cam_player_mode(g.w, g.cam);
-	    break;
-	case MODE_AIRPLANE:
-	    g.cam = cam_airplane_mode(g.w, g.cam);
-	    break;
-	default:
-	    break; 
-    }
-    if(glfwGetKey(g.w, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-    {
-	terminate_program();
-	printf("foobar: ESC pressed. exiting.\n");
-	glfwSetWindowShouldClose(g.w, true);
-    }
-    if (glfwGetKey(g.w, GLFW_KEY_F1) == GLFW_PRESS){
-	glUseProgram(g.shade);
-	g.shade = update_shader_program("shader.vert", "shader.frag");
-    }
-    if (glfwGetKey(g.w, GLFW_KEY_F2) == GLFW_PRESS){ 
-	dump_floppas(g.obj, g.count, g.cam);
-    }
-    if (glfwGetKey(g.w, GLFW_KEY_F3) == GLFW_PRESS){ 
-	load_floppas(g.obj, &g.count, &g.cam);
-    }
-    if (glfwGetKey(g.w, GLFW_KEY_F4) == GLFW_PRESS){ 
-	g.floppa_range += 5;
-	free_floppas(g.obj, &g.count);
-	rand_floppa(g.obj, &g.count, FLOPPA_COUNT, g.floppa_range); 
-    } 
-    if (glfwGetKey(g.w, GLFW_KEY_F5) == GLFW_PRESS && key_table[glfwGetKeyScancode(GLFW_KEY_F5)] == GLFW_RELEASE){ 
-	g.floppa_range -= (g.floppa_range > 5) ? 5: 0;
-	free_floppas(g.obj, &g.count);
-	rand_floppa(g.obj, &g.count, FLOPPA_COUNT, g.floppa_range); 
-
-	key_table[glfwGetKeyScancode(GLFW_KEY_F5)] = GLFW_PRESS; 
-    } 
-    else if (glfwGetKey(g.w, GLFW_KEY_F5) == GLFW_RELEASE) key_table[glfwGetKeyScancode(GLFW_KEY_F5)] = GLFW_RELEASE;
 
     return g;
 } 
 
-
 bool firstMouse = true;
 float lastX = 400, lastY = 300;
 
-struct Camera mouse_callback(double xpos, double ypos, struct Camera cam) 
+struct Camera fps_camera_update(GLFWwindow * w, struct Camera cam) 
 { 
-    //if (firstMouse)
-    //{
-    //    lastX = xpos;
-    //    lastY = ypos;
-    //    firstMouse = false;
-    //}
+    double xpos, ypos; glfwGetCursorPos(w, &xpos, &ypos);		
+
+    if (firstMouse)
+    {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
 
     float xoffset = xpos - lastX;
     float yoffset = lastY - ypos; 
@@ -347,13 +241,328 @@ struct Camera mouse_callback(double xpos, double ypos, struct Camera cam)
     front[Z] = sin(glm_rad(cam.yaw)) * cos(glm_rad(cam.pitch));
     glm_vec3_normalize(front); glm_vec3_copy(front, cam.front);
 
-    return cam;
-
+    return cam; 
 }
+
+#define MOVE_SPEED 10 * delta_time
+#define ORBIT_SPEED 0.2
+
+struct engine_state
+cam_orbit_mode(struct engine_state g)  
+{ 
+
+    float radius = 25;
+
+
+    if (glfwGetKey(g.w, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 horizon_plane = { g.cam.front[X], 0, g.cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_add(horizon_plane, g.cam.pos, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	//vec3 ret = { 0 };
+	vec3 horizon_plane = { g.cam.front[X], 0, g.cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_sub(g.cam.pos, horizon_plane, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_D) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_A) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos); 
+    } 
+    if (glfwGetKey(g.w, GLFW_KEY_Q) == GLFW_PRESS)
+    {
+	g.cam.yaw += ORBIT_SPEED;
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_E) == GLFW_PRESS)
+    {
+	g.cam.yaw -= ORBIT_SPEED;
+    } 
+
+    float rot_x = sin(g.cam.yaw * ORBIT_SPEED) * radius;
+    float rot_z = cos(g.cam.yaw * ORBIT_SPEED) * radius;
+
+    g.cam = fps_camera_update(g.w, g.cam);
+
+    glm_mat4_identity(g.cam.projection);
+    glm_mat4_identity(g.cam.view);
+
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_lookat( (vec3) {rot_x + g.cam.pos[X], 
+	    		g.cam.pos[Y], 
+	    		rot_z + g.cam.pos[Z]}, 
+	    	g.cam.pos, g.cam.up, 
+	    	g.cam.view); 
+
+    return g;
+} 
+
+struct engine_state
+cam_stare_mode(struct engine_state g)  
+{ 
+    glm_mat4_identity(g.cam.projection);
+    glm_mat4_identity(g.cam.view);
+
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_lookat(g.cam.pos, (vec3) {0, 0, 0}, g.cam.up, g.cam.view); 
+
+    if (glfwGetKey(g.w, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 horizon_plane = { g.cam.front[X], 0, g.cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_add(horizon_plane, g.cam.pos, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	//vec3 ret = { 0 };
+	vec3 horizon_plane = { g.cam.front[X], 0, g.cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_sub(g.cam.pos, horizon_plane, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_D) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_A) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos); 
+    } 
+
+    return g;
+} 
+
+
+struct engine_state
+cam_player_mode(struct engine_state g)
+{ 
+
+    if (glfwGetKey(g.w, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 horizon_plane = { g.cam.front[X], 0, g.cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_add(horizon_plane, g.cam.pos, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	//vec3 ret = { 0 };
+	vec3 horizon_plane = { g.cam.front[X], 0, g.cam.front[Z] };
+	glm_vec3_normalize(horizon_plane);
+	glm_vec3_scale(horizon_plane, MOVE_SPEED, horizon_plane);
+	glm_vec3_sub(g.cam.pos, horizon_plane, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_D) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_A) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos); 
+    } 
+    
+    g.cam = fps_camera_update(g.w, g.cam);
+    glm_mat4_identity(g.cam.projection);
+    glm_mat4_identity(g.cam.view);
+
+    vec3 camera_target; 
+    glm_vec3_add(g.cam.pos, g.cam.front, camera_target); 
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_lookat(g.cam.pos, camera_target, g.cam.up, g.cam.view);
+
+    //glm_lookat(g.cam.pos, (vec3) {0, 0, 0}, g.cam.up, g.cam.view); 
+
+    return g;
+} 
+struct engine_state
+cam_airplane_mode(struct engine_state g)
+{ 
+    if (glfwGetKey(g.w, GLFW_KEY_W) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_copy(g.cam.front, ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_S) == GLFW_PRESS)
+    {
+	vec3 ret = { 0 };
+	glm_vec3_copy(g.cam.front, ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_D) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_A) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_cross(g.cam.front, g.cam.up, ret);
+	glm_vec3_normalize(ret);
+	glm_vec3_scale(ret, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_SPACE) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_add(g.cam.pos, ret, g.cam.pos);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS){
+	vec3 ret = { 0 };
+	glm_vec3_scale(g.cam.up, MOVE_SPEED, ret);
+	glm_vec3_sub(g.cam.pos, ret, g.cam.pos); 
+    } 
+
+    g.cam = fps_camera_update(g.w, g.cam);
+    glm_mat4_identity(g.cam.projection);
+    glm_mat4_identity(g.cam.view);
+
+    vec3 camera_target; 
+    glm_vec3_add(g.cam.pos, g.cam.front, camera_target); 
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_lookat(g.cam.pos, camera_target, g.cam.up, g.cam.view);
+
+    //glm_lookat(g.cam.pos, (vec3) {0, 0, 0}, g.cam.up, g.cam.view); 
+
+    return g;
+}
+
+#define FLOPPA_COUNT 500
+
+struct engine_state 
+process_input(struct engine_state g)
+{ 
+    switch(g.cam.mode)
+    {
+	case MODE_STARE:
+	    g = cam_stare_mode(g);
+	    break;
+	case MODE_PLAYER:
+	    g = cam_player_mode(g);
+	    break;
+	case MODE_AIRPLANE:
+	    g = cam_airplane_mode(g);
+	    break;
+	case MODE_ORBIT:
+	    g = cam_orbit_mode(g);
+	    break;
+	default:
+	    break; 
+    }
+    if(glfwGetKey(g.w, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+    {
+	terminate_program();
+	printf("foobar: ESC pressed. exiting.\n");
+	glfwSetWindowShouldClose(g.w, true);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_F1) == GLFW_PRESS){
+	glUseProgram(g.shade);
+	g.shade = update_shader_program("shader.vert", "shader.frag");
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_F2) == GLFW_PRESS){ 
+	dump_floppas(g.obj, g.count, g.cam);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_F3) == GLFW_PRESS){ 
+	load_floppas(g.obj, &g.count, &g.cam);
+    }
+    if (glfwGetKey(g.w, GLFW_KEY_F4) == GLFW_PRESS){ 
+	g.floppa_range += 5;
+	free_floppas(g.obj, &g.count);
+	g = rand_floppa(g, FLOPPA_COUNT, g.floppa_range); 
+    } 
+    if (glfwGetKey(g.w, GLFW_KEY_F5) == GLFW_PRESS && key_table[glfwGetKeyScancode(GLFW_KEY_F5)] == GLFW_RELEASE) //ehhhhhhhhhh
+    { 
+	g.floppa_range -= (g.floppa_range > 5) ? 5: 0;
+	free_floppas(g.obj, &g.count);
+	g = rand_floppa(g, FLOPPA_COUNT, g.floppa_range); 
+
+	key_table[glfwGetKeyScancode(GLFW_KEY_F5)] = GLFW_PRESS; 
+    } 
+    else if (glfwGetKey(g.w, GLFW_KEY_F5) == GLFW_RELEASE) key_table[glfwGetKeyScancode(GLFW_KEY_F5)] = GLFW_RELEASE; //ehhhhhhhhhh
+
+    if (glfwGetKey(g.w, GLFW_KEY_T) == GLFW_PRESS && key_table[glfwGetKeyScancode(GLFW_KEY_T)] == GLFW_RELEASE) //ehhhhhhhhhh
+    { 
+	if (g.cam.mode >= MODE_COUNT) g.cam.mode = 1;
+	else g.cam.mode += 1; 
+
+	key_table[glfwGetKeyScancode(GLFW_KEY_T)] = GLFW_PRESS; 
+    } 
+    else if (glfwGetKey(g.w, GLFW_KEY_T) == GLFW_RELEASE) key_table[glfwGetKeyScancode(GLFW_KEY_T)] = GLFW_RELEASE; //ehhhhhhhhhh
+
+    return g;
+} 
+
+
+
+
+
 void get_scroll(GLFWwindow * window, double xoffset, double yoffset) //fuck callback functions
 {
 	xscroll = xoffset; 
 	yscroll = yoffset;
+
+	window = window; // silenciar erro
 } 
 struct Camera
 update_scroll(struct Camera cam)
@@ -404,7 +613,8 @@ unsigned int load_texture(const char *filename)
 	exit(1);
     } 
 } 
-char * file_to_string(const char * filename)
+char* 
+file_to_string(const char * filename)
 { 
     FILE* tmp = fopen(filename, "r");
     if (tmp == NULL)
@@ -438,7 +648,7 @@ unsigned int compile_shader(const char * shader_source, GLenum target_shader)
     if(!success)
     {
 	glGetShaderInfoLog(shader_process, 512, NULL, infolog); //log do erro
-	fprintf(stderr, "falha bo shder :(");
+	fprintf(stderr, "falha ao compilar shader\n");
 	printf("%s\n", infolog);
 	exit(1);
     }
@@ -479,6 +689,79 @@ unsigned int update_shader_program(char * vert_shader, char * frag_shader)
 
 }
 
+unsigned int normal_cube()
+{
+
+float vertices[] = 
+{
+    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f,
+     0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+     0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+    -0.5f,  0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+    -0.5f, -0.5f, -0.5f,  0.0f,  0.0f, -1.0f, 
+
+    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+     0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+    -0.5f,  0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f,  0.0f, 1.0f,
+
+    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+    -0.5f,  0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+    -0.5f, -0.5f, -0.5f, -1.0f,  0.0f,  0.0f,
+    -0.5f, -0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+    -0.5f,  0.5f,  0.5f, -1.0f,  0.0f,  0.0f,
+
+     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+     0.5f,  0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+     0.5f, -0.5f, -0.5f,  1.0f,  0.0f,  0.0f,
+     0.5f, -0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+     0.5f,  0.5f,  0.5f,  1.0f,  0.0f,  0.0f,
+
+    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+     0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+     0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+    -0.5f, -0.5f,  0.5f,  0.0f, -1.0f,  0.0f,
+    -0.5f, -0.5f, -0.5f,  0.0f, -1.0f,  0.0f,
+
+    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+     0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+     0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+    -0.5f,  0.5f,  0.5f,  0.0f,  1.0f,  0.0f,
+    -0.5f,  0.5f, -0.5f,  0.0f,  1.0f,  0.0f
+};
+     
+
+
+    unsigned int VBO; glGenBuffers(1, &VBO);  
+    unsigned int VAO; glGenVertexArrays(1, &VAO); 
+    unsigned int EBO; glGenBuffers(1, &EBO); 
+
+    glBindVertexArray(VAO); 
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO); 
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);  
+
+    //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    //glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(tetra_index), tetra_index, GL_STATIC_DRAW); 
+
+    //aPos
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void *) 0);
+    glEnableVertexAttribArray(0); 
+
+    //aTexCoord
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 6, (void *) (sizeof(float) * 3) );
+    glEnableVertexAttribArray(2); 
+
+
+    return VAO; 
+}
 
 unsigned int floppa_cube()
 {
@@ -540,14 +823,77 @@ unsigned int floppa_cube()
     //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
     //glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(tetra_index), tetra_index, GL_STATIC_DRAW); 
 
+    //aPos
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) 0);
     glEnableVertexAttribArray(0); 
 
+    //aTexCoord
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) (sizeof(float) * 3) );
     glEnableVertexAttribArray(1); 
 
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindVertexArray(0);
+
+    return VAO; 
+}
+
+unsigned int light_cube()
+{
+    float cube_vertices[] = {
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
+        0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
+        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
+
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+        0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+        0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+
+        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+        0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
+        0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+        0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
+
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
+        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
+        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
+        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
+        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
+    }; 
+     
+
+
+    unsigned int VBO; glGenBuffers(1, &VBO);  
+    unsigned int VAO; glGenVertexArrays(1, &VAO); 
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO); 
+    glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);  
+
+    glBindVertexArray(VAO); 
+
+    //aPos
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) 0);
+    glEnableVertexAttribArray(0); 
 
     return VAO; 
 }
@@ -606,13 +952,20 @@ unsigned int tetrahedron_vao()
     
 }
 
+void set_uniform_matrix( int shader_program, const char* uniform_name, mat4 mat)
+{ 
+    glUseProgram(shader_program);
+    glUniformMatrix4fv(glGetUniformLocation(shader_program, uniform_name), 1, GL_FALSE, (float *) mat); 
+}
+
 int main(void)
 { 
-    struct engine_context game = { 0 };
+    struct engine_state game = { 0 };
     game.floppa_range = 40; 
     memset(key_table, GLFW_RELEASE, KEY_AMOUNT);
     yscroll = 0; xscroll = 0; 
     printf("hello world\n");
+
 
     //glfw fluff 
     glfwInit();
@@ -621,7 +974,7 @@ int main(void)
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); 
     
 
-    game.w = glfwCreateWindow(500, 500, "teste", NULL, NULL);
+    game.w = glfwCreateWindow(500, 500, "caracal", NULL, NULL);
     if (game.w == NULL) {
 	glfwTerminate();
 	return -1;
@@ -634,7 +987,7 @@ int main(void)
     }
 
     glfwSetFramebufferSizeCallback(game.w, framebuffer_size_callback); 
-    //glfwSetCursorPosCallback(game.w, mouse_callback);
+    //glfwSetCursorPosCallback(game.w, get_mouse_pos);
     glfwSetScrollCallback(game.w, get_scroll);
     glfwSetInputMode(game.w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     //glfw fluff 
@@ -642,15 +995,15 @@ int main(void)
     //inicializacao
     glEnable(GL_DEPTH_TEST); 
 
-    unsigned int VAO = 			floppa_cube();
-    		 game.shade = 		update_shader_program("shader.vert", "shader.frag"); 
+    unsigned int VAO = 			normal_cube();
+    unsigned int vao_light = 		light_cube();
+    unsigned int shader_light = 	update_shader_program( "./shader.vert", "./lightcube.frag" );
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
-    		 game.cam = 		new_camera(MODE_AIRPLANE);
-    
-    glUseProgram(game.shade); 
 
-    game.count = 0;
-    game.obj = calloc(5000, sizeof(struct object *));
+    game.shade = 	update_shader_program("shader.vert", "shader.frag"); 
+    game.cam = 		new_camera(MODE_PLAYER); 
+    game.count = 	0;
+    game.obj = 		calloc(5000, sizeof(struct object *));
 
 //#define AUTO_LOAD
 
@@ -660,7 +1013,7 @@ int main(void)
 	load_floppas(game.obj, &game.count, &game.cam);
     }
 #else
-    rand_floppa(game.obj, &game.count, FLOPPA_COUNT, 50); 
+    game = rand_floppa(game, FLOPPA_COUNT, 50); 
 #endif
     //inicializacao
 
@@ -668,43 +1021,28 @@ int main(void)
     while(!glfwWindowShouldClose(game.w))
     {
 	update_delta_time(); 
-	glClearColor(		(glfwGetTime() + 10) * 30, (glfwGetTime() + 15) * 30, (glfwGetTime() + 20) * 30, 1); 
+	glClearColor(		0.01,0.01,0.01,0.01); 
 	glClear(		GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-	game = 			process_input(game); 
-	game.cam = 		update_scroll(game.cam);
-	glUseProgram(		game.shade); 
 	glfwGetWindowSize(	game.w, &game.screen_x, &game.screen_y); 
 
+	game = 			process_input(game); 
+	game.cam = 		update_scroll(game.cam);
+
+	glUseProgram(		game.shade); 
 	glActiveTexture(	GL_TEXTURE1);
 	glBindTexture(		GL_TEXTURE_2D, texture1); 
+
 	glUniform1i(		glGetUniformLocation(game.shade, "texture1"), 1); 
+	glUniform3f(		glGetUniformLocation(game.shade, "objectColor"), 1, .5, .31); 
+	glUniform3f(		glGetUniformLocation(game.shade, "lightColor"), 1, 1, 1); 
 
-	mat4 model = { 0 }; 		glm_mat4_identity(model);
-	mat4 projection = { 0 }; 	glm_mat4_identity(projection); 
-	mat4 view = { 0 }; 		glm_mat4_identity(view); 
+	set_uniform_matrix(	game.shade, "view", game.cam.view);
+	set_uniform_matrix(	game.shade, "projection", game.cam.projection); 
 
-	glm_perspective(glm_rad(game.cam.fov), (float) game.screen_x / game.screen_y, 0.01, 400, projection);
-	//glm_ortho(		-1.0f, 1, -1, 1, -1, 1, projection); 
-
-	vec3 camera_target; 
-	//glm_vec3_add(	main_cam->pos, main_cam->front, camera_target); 
-	
-	float speed = 0.5;
-	float radius = 25;
-	float rot_x = sin(glfwGetTime() * speed) * radius;
-	float rot_z = cos(glfwGetTime() * speed) * radius;
-
-	glm_lookat((vec3) {rot_x, 0, rot_z}, (vec3) {0, 0, 0}, game.cam.up, view);
-
-	unsigned int viewloc = 	glGetUniformLocation(game.shade, "view");
-	unsigned int projloc = 	glGetUniformLocation(game.shade, "projection"); 
-
-	glUniformMatrix4fv(viewloc, 1, GL_FALSE, (float *) view); 
-	glUniformMatrix4fv(projloc, 1, GL_FALSE, (float *) projection); 
-
+	mat4 model = { 0 }; glm_mat4_identity(model);
 
 	glBindVertexArray(VAO); 
-	{ 
+	{ //floppa
 	    for (size_t i = 0; i < game.count; ++i)
 	    {
 	        if (game.obj[i] != NULL)
@@ -713,18 +1051,39 @@ int main(void)
 	            #define relative_pos floppa_pos[X] / 20 , floppa_pos[Y] / 20, floppa_pos[Z] / 20
 	    
 	            glm_mat4_identity(model);
+		    //glm_rotate(model, glfwGetTime() * 1, (vec3) {0, 1, 0});
 	            glm_translate(model, floppa_pos); 
-	            glUniform3f(glGetUniformLocation(game.shade, "relative_color"),  relative_pos);
+		    { // lighting 
+			glUniform3f(glGetUniformLocation(game.shade, "relative_color"),  relative_pos);
+			glUniform3f(glGetUniformLocation(game.shade, "lightPos"),  0, 0, 0);
+			glUniform3f(glGetUniformLocation(game.shade, "viewPos"),  game.cam.pos[X], game.cam.pos[Y], game.cam.pos[Z]);
+		    }
 	            glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
 	            glDrawArrays(GL_TRIANGLES, 0, 36);
 	        }
 	    }
 	}
-	glm_mat4_identity(model);
-	glm_translate(model, (vec3) { round(game.cam.pos[X]), round(game.cam.pos[Y]), round(game.cam.pos[Z])});
-	glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
-	glDrawArrays(GL_LINE_STRIP, 0, 36); 
-	
+	{ //"hitbox" da camera
+	    glm_mat4_identity(model); 
+	    glm_translate(model, (vec3) { 
+		    round(game.cam.pos[X]), 
+		    round(game.cam.pos[Y]), 
+		    round(game.cam.pos[Z])});
+	    glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
+	    glDrawArrays(GL_LINE_STRIP, 0, 36); 
+	}
+	{ //lampada
+	    glUseProgram(shader_light);
+	    set_uniform_matrix(shader_light, "view", game.cam.view);
+	    set_uniform_matrix(shader_light, "projection", game.cam.projection); 
+
+	    glm_mat4_identity(model);
+	    glm_translate(model, (vec3) { 0, 0, 0 });
+	    glUniformMatrix4fv(glGetUniformLocation(shader_light, "model"), 1, GL_FALSE, (float *) model); 
+
+	    glBindVertexArray(vao_light); 
+	    glDrawArrays(GL_TRIANGLES, 0, 36); 
+	}
 
 	glfwSwapBuffers(game.w);
 	glfwPollEvents();
@@ -734,7 +1093,11 @@ int main(void)
 
 }
 
-void terminate_program(struct engine_context g)
+void terminate_program(
+#ifdef AUTO_LOAD
+struct engine_state g
+#endif
+)
 {
 
 #ifdef AUTO_LOAD
