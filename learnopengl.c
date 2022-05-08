@@ -43,10 +43,10 @@ struct Camera
 
 struct engine_state 
 {
-    struct object ** obj;
+    struct object** obj;
     unsigned int shade;
     struct Camera cam;
-    GLFWwindow * w;
+    GLFWwindow* w;
     
     size_t count;
     size_t floppa_range; 
@@ -66,7 +66,7 @@ struct shader_contenxt
 
 void terminate_program();
 
-unsigned int update_shader_program(char * vert_shader, char * frag_shader);
+unsigned int update_shader_program(char* vert_shader, char* frag_shader);
 
 struct Camera new_camera(enum camera_mode mode)
 { 
@@ -90,6 +90,7 @@ void update_delta_time()
     current_frame = glfwGetTime(); 
 }
 
+#define round_vec3(x) (vec3) {round(x[X]), round(x[Y]), round(x[Z])} 
 #define root_grid_pos (vec3) { round(root[i]->pos[X]), round(root[i]->pos[Y]), round(root[i]->pos[Z])}
 #define obj_grid_pos (vec3) { round(g.obj[i]->pos[X]), round(g.obj[i]->pos[Y]), round(g.obj[i]->pos[Z])}
 
@@ -111,7 +112,7 @@ void pop_floppa(struct object ** root, vec3 position, size_t count)
 }
 void dump_floppas(struct object ** root, size_t count, struct Camera cam)
 { 
-    FILE * target_file = fopen(DUMP_FILE, "w");
+    FILE* target_file = fopen(DUMP_FILE, "w");
 
     fwrite(&count, sizeof(size_t), 1, target_file);
     fwrite(&cam, sizeof(struct Camera), 1, target_file);
@@ -151,8 +152,7 @@ void load_floppas(struct object ** root, size_t *count, struct Camera * cam)
     }
     fclose(target_file);
     
-}
-
+} 
 bool is_space_free(struct engine_state g, vec3 space)
 {
     for (unsigned int i = 0; i < g.count; ++i) {
@@ -164,39 +164,32 @@ bool is_space_free(struct engine_state g, vec3 space)
     }
     return true; 
 }
-struct engine_state
+struct object* instance_floopa(vec3 position) //ehhhh
+{
+    return memcpy(malloc(sizeof(struct object)), &(struct object) 
+    { .pos = { position[X], position[Y], position[Z] } }, sizeof(struct object)); 
+}
+struct engine_state 
 new_floppa(struct engine_state g, vec3 position)
 { 
     if (!is_space_free(g, position)){
 	return g;
-    }
-
-    struct object * floppa = malloc(sizeof(struct object));
-    memcpy(floppa->pos, (vec3) { 
-	    round(position[X]), 
-	    round(position[Y]), 
-	    round(position[Z])}, sizeof(vec3)); 
-
-    g.obj[g.count] = floppa; 
+    } 
+    g.obj[g.count] = instance_floopa(position); 
     g.count += 1;
     return g;
 } 
-
 int rand_over_range(const int range) 
 {
     return (rand() % range) - (range / (int) 2); 
-}
-
-struct engine_state
+} 
+struct engine_state 
 rand_floppa(struct engine_state g, int MAX_FLOP, const int RANGE)
 {
-    srand(0);
+    srand(time(NULL));
 
     while (MAX_FLOP) { 
-	g = new_floppa(g, (vec3) { 
-	    rand_over_range(RANGE),
-	    rand_over_range(RANGE),
-	    rand_over_range(RANGE)});
+	g = new_floppa(g, (vec3) { rand_over_range(RANGE), rand_over_range(RANGE), rand_over_range(RANGE)});
 
 	--MAX_FLOP; 
     } 
@@ -518,7 +511,7 @@ process_input(struct engine_state g)
     }
     if (glfwGetKey(g.w, GLFW_KEY_F1) == GLFW_PRESS){
 	glUseProgram(g.shade);
-	g.shade = update_shader_program("shader.vert", "shader.frag");
+	g.shade = update_shader_program("shaders/shader.vert", "shaders/shader.frag");
     }
     if (glfwGetKey(g.w, GLFW_KEY_F2) == GLFW_PRESS){ 
 	dump_floppas(g.obj, g.count, g.cam);
@@ -549,6 +542,12 @@ process_input(struct engine_state g)
 	key_table[glfwGetKeyScancode(GLFW_KEY_T)] = GLFW_PRESS; 
     } 
     else if (glfwGetKey(g.w, GLFW_KEY_T) == GLFW_RELEASE) key_table[glfwGetKeyScancode(GLFW_KEY_T)] = GLFW_RELEASE; //ehhhhhhhhhh
+
+    if (glfwGetKey(g.w, GLFW_KEY_X) == GLFW_PRESS && key_table[glfwGetKeyScancode(GLFW_KEY_X)] == GLFW_RELEASE) //ehhhhhhhhhh
+    { 
+	g = new_floppa(g, g.cam.pos); 
+    } 
+    else if (glfwGetKey(g.w, GLFW_KEY_X) == GLFW_RELEASE) key_table[glfwGetKeyScancode(GLFW_KEY_X)] = GLFW_RELEASE; //ehhhhhhhhhh
 
     return g;
 } 
@@ -609,17 +608,16 @@ unsigned int load_texture(const char *filename)
     }
     else
     {
-	fprintf(stderr, "deu pra carregar a imagem nao chefia\n");
+	fprintf(stderr, "falha ao carregar imagem\n");
 	exit(1);
     } 
 } 
-char* 
-file_to_string(const char * filename)
+char* file_to_string(const char * filename)
 { 
     FILE* tmp = fopen(filename, "r");
     if (tmp == NULL)
     {
-	fprintf(stderr, "esse nome aqui %s nao existe nao negao\n", filename);
+	fprintf(stderr, "arquivo %s inexistente\n", filename);
 	exit(1);
     }
     fseek(tmp, 0, SEEK_END);
@@ -647,7 +645,7 @@ unsigned int compile_shader(const char * shader_source, GLenum target_shader)
     glGetShaderiv(shader_process, GL_COMPILE_STATUS, &success); 
     if(!success)
     {
-	glGetShaderInfoLog(shader_process, 512, NULL, infolog); //log do erro
+	glGetShaderInfoLog(shader_process, 512, NULL, infolog); 
 	fprintf(stderr, "falha ao compilar shader\n");
 	printf("%s\n", infolog);
 	exit(1);
@@ -672,7 +670,7 @@ unsigned int update_shader_program(char * vert_shader, char * frag_shader)
     glLinkProgram(shader_program);
 
     int success;
-    char infolog[521]; //buffer onde erro sera logado
+    char infolog[521]; 
     glGetProgramiv(shader_program, GL_LINK_STATUS, &success);
     if(!success)
     {
@@ -766,54 +764,54 @@ float vertices[] =
 unsigned int floppa_cube()
 {
     float cube_vertices[] = {
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
-        0.5f, -0.5f, -0.5f,  1.0f, 0.0f,
-        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,
-
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-        0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-        0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
-        0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-
-        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-        0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
-        0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-        0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-        -0.5f, -0.5f,  0.5f,  0.0f, 0.0f,
-        -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f,
-        0.5f,  0.5f, -0.5f,  1.0f, 1.0f,
-        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-        0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-        -0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
-        -0.5f,  0.5f, -0.5f,  0.0f, 1.0f
+        -0.5f, -0.5f, -0.5f, 	0.0f, 0.0f, 	0.0f,  0.0f, -1.0f,
+         0.5f, -0.5f, -0.5f,  	1.0f, 0.0f,  	0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  	1.0f, 1.0f,  	0.0f,  0.0f, -1.0f,
+         0.5f,  0.5f, -0.5f,  	1.0f, 1.0f,  	0.0f,  0.0f, -1.0f,
+        -0.5f,  0.5f, -0.5f, 	0.0f, 1.0f, 	0.0f,  0.0f, -1.0f,
+        -0.5f, -0.5f, -0.5f, 	0.0f, 0.0f, 	0.0f,  0.0f, -1.0f,
+                             	             	                   
+        -0.5f, -0.5f,  0.5f, 	0.0f, 0.0f, 	0.0f,  0.0f, 1.0f,
+         0.5f, -0.5f,  0.5f,  	1.0f, 0.0f,  	0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  	1.0f, 1.0f,  	0.0f,  0.0f, 1.0f,
+         0.5f,  0.5f,  0.5f,  	1.0f, 1.0f,  	0.0f,  0.0f, 1.0f,
+        -0.5f,  0.5f,  0.5f, 	0.0f, 1.0f, 	0.0f,  0.0f, 1.0f,
+        -0.5f, -0.5f,  0.5f, 	0.0f, 0.0f, 	0.0f,  0.0f, 1.0f,
+                             	             	                   
+        -0.5f,  0.5f,  0.5f, 	1.0f, 0.0f, 	1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f, 	1.0f, 1.0f, 	1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f, 	0.0f, 1.0f, 	1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f, 	0.0f, 1.0f, 	1.0f,  0.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f, 	0.0f, 0.0f, 	1.0f,  0.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f, 	1.0f, 0.0f, 	1.0f,  0.0f,  0.0f,
+                             	             	                   
+         0.5f,  0.5f,  0.5f,  	1.0f, 0.0f,  	1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  	1.0f, 1.0f,  	1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  	0.0f, 1.0f,  	1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  	0.0f, 1.0f,  	1.0f,  0.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  	0.0f, 0.0f,  	1.0f,  0.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  	1.0f, 0.0f,  	1.0f,  0.0f,  0.0f,
+                             	             	                   
+        -0.5f, -0.5f, -0.5f, 	0.0f, 1.0f, 	0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f, -0.5f,  	1.0f, 1.0f,  	0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  	1.0f, 0.0f,  	0.0f, -1.0f,  0.0f,
+         0.5f, -0.5f,  0.5f,  	1.0f, 0.0f,  	0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f,  0.5f, 	0.0f, 0.0f, 	0.0f, -1.0f,  0.0f,
+        -0.5f, -0.5f, -0.5f, 	0.0f, 1.0f, 	0.0f, -1.0f,  0.0f,
+                             	             	                   
+        -0.5f,  0.5f, -0.5f, 	0.0f, 1.0f, 	0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f, -0.5f,  	1.0f, 1.0f,  	0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  	1.0f, 0.0f,  	0.0f,  1.0f,  0.0f,
+         0.5f,  0.5f,  0.5f,  	1.0f, 0.0f,  	0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f,  0.5f, 	0.0f, 0.0f, 	0.0f,  1.0f,  0.0f,
+        -0.5f,  0.5f, -0.5f, 	0.0f, 1.0f, 	0.0f,  1.0f,  0.0f
     }; 
      
 
 
     unsigned int VBO; glGenBuffers(1, &VBO);  
     unsigned int VAO; glGenVertexArrays(1, &VAO); 
-    unsigned int EBO; glGenBuffers(1, &EBO); 
+    //unsigned int EBO; glGenBuffers(1, &EBO); 
 
     glBindVertexArray(VAO); 
 
@@ -821,16 +819,21 @@ unsigned int floppa_cube()
     glBufferData(GL_ARRAY_BUFFER, sizeof(cube_vertices), cube_vertices, GL_STATIC_DRAW);  
 
     //glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    //glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(tetra_index), tetra_index, GL_STATIC_DRAW); 
+    //glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(tetra_index), tet8a_index, GL_STATIC_DRAW); 
 
     //aPos
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) 0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 8, (void *) 0);
     glEnableVertexAttribArray(0); 
 
     //aTexCoord
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 5, (void *) (sizeof(float) * 3) );
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 8, (void *) (sizeof(float) * 3) );
     glEnableVertexAttribArray(1); 
 
+    //aNormal
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, sizeof(float) * 8, (void *) (sizeof(float) * 5) );
+    glEnableVertexAttribArray(2); 
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     return VAO; 
 }
@@ -957,6 +960,16 @@ void set_uniform_matrix( int shader_program, const char* uniform_name, mat4 mat)
     glUseProgram(shader_program);
     glUniformMatrix4fv(glGetUniformLocation(shader_program, uniform_name), 1, GL_FALSE, (float *) mat); 
 }
+void set_uniform_3vector( int shader_program, const char* uniform_name, vec3 vec)
+{ 
+    glUseProgram(shader_program);
+    glUniform3f(glGetUniformLocation(shader_program, uniform_name), vec[X], vec[Y], vec[Z]); 
+}
+void set_uniform_1float( int shader_program, const char* uniform_name, float f)
+{ 
+    glUseProgram(shader_program);
+    glUniform1f(glGetUniformLocation(shader_program, uniform_name), f); 
+}
 
 int main(void)
 { 
@@ -997,10 +1010,10 @@ int main(void)
 
     unsigned int VAO = 			normal_cube();
     unsigned int vao_light = 		light_cube();
-    unsigned int shader_light = 	update_shader_program( "./shader.vert", "./lightcube.frag" );
+    unsigned int shader_light = 	update_shader_program( "shaders/shader.vert", "shaders/lightcube.frag" );
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
 
-    game.shade = 	update_shader_program("shader.vert", "shader.frag"); 
+    game.shade = 	update_shader_program("shaders/shader.vert", "shaders/shader.frag"); 
     game.cam = 		new_camera(MODE_PLAYER); 
     game.count = 	0;
     game.obj = 		calloc(5000, sizeof(struct object *));
@@ -1054,9 +1067,11 @@ int main(void)
 		    //glm_rotate(model, glfwGetTime() * 1, (vec3) {0, 1, 0});
 	            glm_translate(model, floppa_pos); 
 		    { // lighting 
-			glUniform3f(glGetUniformLocation(game.shade, "relative_color"),  relative_pos);
-			glUniform3f(glGetUniformLocation(game.shade, "lightPos"),  0, 0, 0);
-			glUniform3f(glGetUniformLocation(game.shade, "viewPos"),  game.cam.pos[X], game.cam.pos[Y], game.cam.pos[Z]);
+			set_uniform_3vector(game.shade, "lightPos", (vec3) {0, 0, 0});
+			set_uniform_3vector(game.shade, "viewPos", game.cam.pos);
+
+			set_uniform_1float(game.shade, "light.ambient_strength", 0.05);
+			set_uniform_1float(game.shade, "light.specular_strength", 0.5);
 		    }
 	            glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
 	            glDrawArrays(GL_TRIANGLES, 0, 36);
