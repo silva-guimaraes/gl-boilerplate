@@ -1002,7 +1002,7 @@ unsigned int framebuffer_quad()
 
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void *) 0);
     glEnableVertexAttribArray(0); 
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void *) 2);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(float) * 4, (void *)(2 * sizeof(float)));
     glEnableVertexAttribArray(1); 
 
     glBindBuffer(GL_ARRAY_BUFFER, 0); 
@@ -1057,8 +1057,8 @@ int main(void)
 
     glfwSetFramebufferSizeCallback(game.w, framebuffer_size_callback); 
     //glfwSetCursorPosCallback(game.w, get_mouse_pos);
-    glfwSetScrollCallback(game.w, get_scroll);
-    glfwSetInputMode(game.w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    //glfwSetScrollCallback(game.w, get_scroll);
+    //glfwSetInputMode(game.w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     //glfw fluff 
 
     //inicializacao
@@ -1177,7 +1177,7 @@ int main(void)
 
 	glfwGetWindowSize(game.w, &game.screen_x, &game.screen_y); 
 
-	//glBindFramebuffer(GL_FRAMEBUFFER, FBO); 
+	glBindFramebuffer(GL_FRAMEBUFFER, FBO); 
 	{ 
 	    glClearColor(	0,1,1,1); 
 	    glClear(		GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
@@ -1192,14 +1192,14 @@ int main(void)
 
 	glDisable(		GL_DEPTH_TEST);
 	glClearColor(		1,1,1,1); 
-	//glClear(		GL_COLOR_BUFFER_BIT); 
+	glClear(		GL_COLOR_BUFFER_BIT); 
 	glUseProgram(		quad_shader); 
 	glBindVertexArray(	quad); 
 	glUniform1i(glGetUniformLocation(quad_shader, "screen_texture"), 0); 
 	glBindTexture(		GL_TEXTURE_2D, texture_color_buffer); 
 	//glActiveTexture(	GL_TEXTURE0);
 
-	glDrawArrays(GL_LINES, 0, 6);
+	glDrawArrays(GL_TRIANGLES, 0, 6);
 
 	game.cam.mode = MODE_NONE;
 	game = process_input(game); 
