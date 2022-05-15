@@ -16,6 +16,8 @@
 #define SCROLL_SPEED 4.0
 #define KEY_AMOUNT 245
 #define MODE_COUNT 4
+#define zNEAR 0.1
+#define zFAR 400
 
 double xscroll, yscroll;
 char key_table[KEY_AMOUNT];
@@ -308,7 +310,7 @@ cam_orbit_mode(struct engine_state g)
     glm_mat4_identity(g.cam.projection);
     glm_mat4_identity(g.cam.view);
 
-    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, zNEAR, zFAR, g.cam.projection);
     glm_lookat( (vec3) {rot_x + g.cam.pos[X], 
 	    		g.cam.pos[Y], 
 	    		rot_z + g.cam.pos[Z]}, 
@@ -324,7 +326,7 @@ cam_stare_mode(struct engine_state g)
     glm_mat4_identity(g.cam.projection);
     glm_mat4_identity(g.cam.view);
 
-    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, zNEAR, zFAR, g.cam.projection);
     glm_lookat(g.cam.pos, (vec3) {0, 0, 0}, g.cam.up, g.cam.view); 
 
     if (glfwGetKey(g.w, GLFW_KEY_W) == GLFW_PRESS)
@@ -421,7 +423,7 @@ cam_player_mode(struct engine_state g)
 
     vec3 camera_target; 
     glm_vec3_add(g.cam.pos, g.cam.front, camera_target); 
-    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, zNEAR, zFAR, g.cam.projection);
     glm_lookat(g.cam.pos, camera_target, g.cam.up, g.cam.view);
 
     //glm_lookat(g.cam.pos, (vec3) {0, 0, 0}, g.cam.up, g.cam.view); 
@@ -476,7 +478,7 @@ cam_airplane_mode(struct engine_state g)
 
     vec3 camera_target; 
     glm_vec3_add(g.cam.pos, g.cam.front, camera_target); 
-    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, 0.01, 400, g.cam.projection);
+    glm_perspective(glm_rad(g.cam.fov), (float) g.screen_x / g.screen_y, zNEAR, zFAR, g.cam.projection);
     glm_lookat(g.cam.pos, camera_target, g.cam.up, g.cam.view);
 
     //glm_lookat(g.cam.pos, (vec3) {0, 0, 0}, g.cam.up, g.cam.view); 
@@ -1057,11 +1059,13 @@ int main(void)
 
     glfwSetFramebufferSizeCallback(game.w, framebuffer_size_callback); 
     //glfwSetCursorPosCallback(game.w, get_mouse_pos);
-    //glfwSetScrollCallback(game.w, get_scroll);
-    //glfwSetInputMode(game.w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetScrollCallback(game.w, get_scroll);
+    glfwSetInputMode(game.w, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     //glfw fluff 
 
     //inicializacao
+
+    glEnable(GL_DEPTH_TEST); 
 
     unsigned int FBO;  unsigned int texture_color_buffer; {
 	glGenFramebuffers(1, &FBO);
@@ -1079,10 +1083,9 @@ int main(void)
 	glGenRenderbuffers(1, &renderbuffer);
 	glBindRenderbuffer(GL_RENDERBUFFER, renderbuffer); 
 	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, game.screen_x, game.screen_y);
-	glFramebufferRenderbuffer(GL_RENDERBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, renderbuffer); 
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, renderbuffer);
 	glBindRenderbuffer(GL_RENDERBUFFER, 0);
-    }
-
+    } 
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE){
 	fprintf(stderr, "framebuffer imcompleto\n");
 	return 1;
@@ -1093,12 +1096,13 @@ int main(void)
     unsigned int quad = 		framebuffer_quad();
     unsigned int triangle = 		hello_triangle();
     unsigned int quad_shader = 		update_shader_program( "shaders/quad.vert", "shaders/quad.frag" );
-    unsigned int test_shader = 		update_shader_program( "shaders/alt_shader.vert", "shaders/alt_shader.frag" );
+    unsigned int test_shader = 		update_shader_program( "shaders/shader.vert", "shaders/alt_shader.frag" );
     unsigned int VAO = 			normal_cube();
     unsigned int vao_light = 		light_cube();
     unsigned int shader_light = 	update_shader_program( "shaders/shader.vert", "shaders/lightcube.frag" );
     unsigned int texture1 = 		load_texture("floppa.jpg"); 
 
+    //game.shade = 	update_shader_program( "shaders/shader.vert", "shaders/lightcube.frag" ); 
     game.shade = 	update_shader_program("shaders/shader.vert", "shaders/shader.frag"); 
     game.cam = 		new_camera(MODE_PLAYER); 
     game.count = 	0;
@@ -1110,117 +1114,97 @@ int main(void)
     while(!glfwWindowShouldClose(game.w))
     {
 	update_delta_time(); 
-	//glBindFramebuffer(GL_FRAMEBUFFER, FBO); 
-	//{ //a cena seguinte inteira é rederizada nesse framebuffer
-	//    glClearColor(	0.01,0.01,0.01,0.01); 
-	//    glClear(		GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
-	//    glEnable(		GL_DEPTH_TEST); 
-	//    glfwGetWindowSize(	game.w, &game.screen_x, &game.screen_y); 
-	//    game = 		process_input(game); 
-	//    game.cam = 		update_scroll(game.cam); 
-	//    glUseProgram(	game.shade); 
-	//    glActiveTexture(	GL_TEXTURE1);
-	//    glBindTexture(	GL_TEXTURE_2D, texture1); 
-	//    glUniform1i(	glGetUniformLocation(game.shade, "texture1"), 1); 
-	//    glUniform3f(	glGetUniformLocation(game.shade, "objectColor"), 1, .5, .31); 
-	//    glUniform3f(	glGetUniformLocation(game.shade, "lightColor"), 1, 1, 1); 
-	//    set_uniform_matrix(	game.shade, "view", game.cam.view);
-	//    set_uniform_matrix(	game.shade, "projection", game.cam.projection); 
-
-	//    mat4 model = { 0 }; glm_mat4_identity(model);
-
-	//    glBindVertexArray(VAO); 
-	//    { //floppa
-	//	for (size_t i = 0; i < game.count; ++i)
-	//	{
-	//	    if (game.obj[i] != NULL)
-	//	    { 
-	//		glm_mat4_identity(model);
-	//		//glm_rotate(model, glfwGetTime() * 1, (vec3) {0, 1, 0});
-	//		glm_translate(model, game.obj[i]->pos); 
-	//		{ // lighting 
-	//		    set_uniform_3vector(game.shade, "lightPos", (vec3) {0, 0, 0});
-	//		    set_uniform_3vector(game.shade, "viewPos", game.cam.pos);
-
-	//		    set_uniform_1float(game.shade, "light.ambient_strength", 0.05);
-	//		    set_uniform_1float(game.shade, "light.specular_strength", 0.5);
-	//		}
-	//		glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
-	//		glDrawArrays(GL_LINE_STRIP, 0, 36);
-	//	    }
-	//	}
-	//    }
-	//    { //"hitbox" da camera
-	//	glm_mat4_identity(model); 
-	//	glm_translate(model, (vec3) { 
-	//		round(game.cam.pos[X]), 
-	//		round(game.cam.pos[Y]), 
-	//		round(game.cam.pos[Z])});
-	//	glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
-	//	glDrawArrays(GL_LINE_STRIP, 0, 36); 
-	//    }
-	//    { //lampada
-	//	glUseProgram(shader_light);
-	//	set_uniform_matrix(shader_light, "view", game.cam.view);
-	//	set_uniform_matrix(shader_light, "projection", game.cam.projection); 
-
-	//	glm_mat4_identity(model);
-	//	glm_translate(model, (vec3) { 0, 0, 0 });
-	//	glUniformMatrix4fv(glGetUniformLocation(shader_light, "model"), 1, GL_FALSE, (float *) model); 
-
-	//	glBindVertexArray(vao_light); 
-	//	glDrawArrays(GL_TRIANGLES, 0, 36); 
-	//    }
-
-	//}
-
-
-	glfwGetWindowSize(game.w, &game.screen_x, &game.screen_y); 
-
-	glBindFramebuffer(GL_FRAMEBUFFER, FBO); 
-	{ 
-	    glClearColor(	0,1,1,1); 
-	    glClear(		GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); 
+	glBindFramebuffer(GL_FRAMEBUFFER, FBO); { //a cena seguinte inteira é rederizada nesse framebuffer
 	    glEnable(		GL_DEPTH_TEST); 
-	    glUseProgram(	test_shader); 
+	    glClearColor(	0.01,0.01,0.01,0.01); 
+	    glClear(		 GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT); 
+	    glfwGetWindowSize(	game.w, &game.screen_x, &game.screen_y); 
+	    glUseProgram(	game.shade); 
+	    glActiveTexture(	GL_TEXTURE1);
+	    glBindTexture(	GL_TEXTURE_2D, texture1); 
+	    glUniform1i(	glGetUniformLocation(game.shade, "texture1"), 1); 
+	    glUniform3f(	glGetUniformLocation(game.shade, "objectColor"), 1, .5, .31); 
+	    glUniform3f(	glGetUniformLocation(game.shade, "lightColor"), 1, 1, 1); 
+	    set_uniform_matrix(	game.shade, "view", game.cam.view);
+	    set_uniform_matrix(	game.shade, "projection", game.cam.projection); 
 
-	    glBindVertexArray(	triangle);
-	    glDrawArrays(	GL_TRIANGLES, 0, 3);
+	    game = 		process_input(game); 
+	    game.cam = 		update_scroll(game.cam); 
+	    
+	    mat4 model = { 0 }; glm_mat4_identity(model);
 
+	    glBindVertexArray(VAO); 
+	    { //floppa
+		for (size_t i = 0; i < game.count; ++i)
+		{
+		    if (game.obj[i] != NULL)
+		    { 
+			glm_mat4_identity(model);
+			glm_rotate(model, glfwGetTime() * 1, (vec3) {0, 1, 0});
+			glm_translate(model, game.obj[i]->pos); 
+			{ // lighting 
+			    set_uniform_3vector(game.shade, "lightPos", (vec3) {0, 0, 0});
+			    set_uniform_3vector(game.shade, "viewPos", game.cam.pos);
+
+			    set_uniform_1float(game.shade, "light.ambient_strength", 0.05);
+			    set_uniform_1float(game.shade, "light.specular_strength", 0.5);
+			}
+			glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
+			glDrawArrays(GL_TRIANGLES, 0, 36);
+		    }
+		}
+	    }
+	    { //"hitbox" da camera
+		glm_mat4_identity(model); 
+		glm_translate(model, (vec3) { 
+			round(game.cam.pos[X]), 
+			round(game.cam.pos[Y]), 
+			round(game.cam.pos[Z])});
+		glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
+		glDrawArrays(GL_LINE_STRIP, 0, 36); 
+	    }
+	    { //lampada
+		glUseProgram(shader_light);
+		set_uniform_matrix(shader_light, "view", game.cam.view);
+		set_uniform_matrix(shader_light, "projection", game.cam.projection); 
+
+		glm_mat4_identity(model);
+		glm_translate(model, (vec3) { 0, 0, 2 });
+		glUniformMatrix4fv(glGetUniformLocation(shader_light, "model"), 1, GL_FALSE, (float *) model); 
+
+		glBindVertexArray(vao_light); 
+		glDrawArrays(GL_TRIANGLES, 0, 36); 
+	    } 
+	    { //triangulo
+		glm_mat4_identity(model);
+
+		glUseProgram(test_shader); 
+		set_uniform_matrix(test_shader, "view", game.cam.view);
+		set_uniform_matrix(test_shader, "projection", game.cam.projection); 
+		glUniformMatrix4fv(glGetUniformLocation(game.shade, "model"), 1, GL_FALSE, (float *) model); 
+
+		glBindVertexArray(triangle);
+		glDrawArrays(	GL_TRIANGLES, 0, 3);
+	    }
 	} 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-	glDisable(		GL_DEPTH_TEST);
-	glClearColor(		1,1,1,1); 
-	glClear(		GL_COLOR_BUFFER_BIT); 
-	glUseProgram(		quad_shader); 
-	glBindVertexArray(	quad); 
-	glUniform1i(glGetUniformLocation(quad_shader, "screen_texture"), 0); 
-	glBindTexture(		GL_TEXTURE_2D, texture_color_buffer); 
-	//glActiveTexture(	GL_TEXTURE0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0); { 
+	    glDisable(		GL_DEPTH_TEST); 
+	    glClearColor(	1,1,1,1); 
+	    glClear(		GL_COLOR_BUFFER_BIT); 
+	    glUseProgram(	quad_shader); 
+	    glBindVertexArray(	quad); 
+	    glUniform1i(glGetUniformLocation(quad_shader, "screen_texture"), 0); 
+	    glUniform2i(glGetUniformLocation(quad_shader, "resolution"), game.screen_x, game.screen_y); 
+	    glActiveTexture(	GL_TEXTURE0);
+	    glBindTexture(	GL_TEXTURE_2D, texture_color_buffer); 
 
-	glDrawArrays(GL_TRIANGLES, 0, 6);
+	    glDrawArrays(GL_TRIANGLES, 0, 6);
+	}
 
-	game.cam.mode = MODE_NONE;
-	game = process_input(game); 
 
 	glfwSwapBuffers(game.w);
-	glfwPollEvents();
-
-	//glBindFramebuffer(GL_FRAMEBUFFER, 0); { //o framebuffer anterior é renderizado em uma textura que logo em seguida é renderizada para o framebuffer padrão.
-	//    glClearColor(1,1,1,1); 
-	//    glClear(GL_COLOR_BUFFER_BIT);
-
-	//    glUseProgram(quad_shader);
-	//    glDisable(GL_DEPTH_TEST);
-	//    glBindVertexArray(quad);
-
-	//    glUniform1i(glGetUniformLocation(quad_shader, "screen_texture"), 1); 
-
-	//    glBindTexture(GL_TEXTURE_2D, texture_color_buffer);
-	//    glDrawArrays(GL_TRIANGLES, 0, 6); 
-	//}
-
+	glfwPollEvents(); 
 
     }
 
@@ -1228,16 +1212,8 @@ int main(void)
 
 }
 
-void terminate_program(
-#ifdef AUTO_LOAD
-struct engine_state g
-#endif
-)
+void terminate_program()
 {
-
-#ifdef AUTO_LOAD
-    dump_floppas(g.obj, g.count, g.cam);
-#endif 
     printf("vendor: %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
     int attribs;
     glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &attribs); 
